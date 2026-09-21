@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Selección semanal de puntos de auditoría de Chile. Cruza planeación, universo y visitas terminadas para generar los CSV de carga." />
+    <meta name="theme-color" content="#163e56" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>Chile · Selección de campo</title>
+  </head>
+  <body>
+    <header class="topbar"><a class="brand" href="./"><span class="brandmark">ch<span>.</span></span><span>PLANEACIÓN DE CAMPO<small>Chile / Selección semanal</small></span></a><span class="local-label"><i></i> Archivos procesados en tu equipo</span></header>
+    <main>
+      <div class="page-title"><div><p class="eyebrow">OPERACIÓN CHILE</p><h1>Prepara la próxima visita.</h1><p>De la planeación semanal a los CSV listos para cargar.</p></div><div class="stamp">SELECCIÓN<span>SEMANAL</span></div></div>
+      <form id="selection-form">
+        <section class="panel period-panel" aria-labelledby="period-heading"><div class="section-heading"><span class="step">01</span><h2 id="period-heading">Define la semana</h2></div>
+          <div class="period-grid">
+            <label>Mes de selección<input type="month" id="month" required /></label>
+            <label>Semana del mes<select id="week"><option value="1">Semana 1</option><option value="2">Semana 2</option><option value="3">Semana 3</option><option value="4">Semana 4</option><option value="5">Semana 5</option></select></label>
+            <label>Semanas de campo del mes<select id="weeks"><option value="4">4 semanas</option><option value="5">5 semanas</option></select></label>
+            <label>Tipo de semana<select id="holidays"><option value="0">Normal · sin feriados</option><option value="1">Con 1 feriado</option><option value="2">Con 2 feriados</option></select></label>
+          </div><div class="week-track" aria-hidden="true"><span>01</span><span>02</span><span>03</span><span>04</span><span id="track5">05</span></div>
+          <p id="period-note" class="note"></p>
+        </section>
+        <div class="workspace-grid">
+          <section class="panel files-panel" aria-labelledby="files-heading"><div class="section-heading"><span class="step">02</span><h2 id="files-heading">Carga tus archivos</h2></div>
+            <label class="file-box" for="planning"><span class="file-icon">↥</span><span class="file-copy"><strong>Planeación semanal</strong><span id="planning-name">Selecciona el Excel con la hoja RETAIL</span><small>.xlsm o .xlsx</small></span><input id="planning" type="file" accept=".xlsm,.xlsx" required /></label>
+            <label class="file-box" for="report"><span class="file-icon">↥</span><span class="file-copy"><strong>Export de visitas <em id="report-required">Opcional en semana 1</em></strong><span id="report-name">Reporte apoyo auditor</span><small>Solo se cuentan encuestas TERMINADO</small></span><input id="report" type="file" accept=".xlsx,.xlsm,.csv" /></label>
+            <label class="file-box universe-box" for="universe"><span class="file-icon">≡</span><span class="file-copy"><strong>Universo de frecuencias</strong><span id="universe-name">Selecciona UNIVERSO CHILE.xlsx</span><small>Se recuerda en este navegador para las próximas semanas</small></span><input id="universe" type="file" accept=".xlsx,.xlsm" /></label>
+            <button id="forget" class="text-button" type="button" hidden>Olvidar universo guardado</button>
+          </section>
+          <aside class="rules-panel"><p class="eyebrow">CRUCE DE ESTUDIOS</p><h2>Una selección,<br>todos los estudios.</h2><div class="study-flow"><div><span class="dot"></span><strong>OSA Bebestibles</strong><small>Base para los estudios Embonor</small></div><div><span class="dot"></span><strong>SOVI Embonor</strong><small>8 estudios, los mismos puntos</small></div><div><span class="dot"></span><strong>Facing ABI</strong><small>Complementa SOVI y cierra el mes</small></div></div><p>Cruz Verde según frecuencia. Colgate una vez al mes. POY completo.</p><div class="output-label"><span>RESULTADO</span><strong>Un ZIP con tus CSV</strong><small>6 columnas · sin encabezados</small></div></aside>
+        </div>
+        <details class="panel settings"><summary>Reglas de conteo y nombres del export</summary><p class="note">SOVI: una visita por semana (lunes a domingo) con los ocho estudios TERMINADO, incluso si se completaron en días diferentes. Solo participan folios habilitados en los ocho estudios. Se cuenta el historial del mes anterior al inicio del planning. La mitad de fijas por auditor se redondea hacia arriba. FERIAS LIBRES y POY se cargan completos.</p><p class="note">Las fijas con feriado se calculan como total × (1 − 0,17 × feriados), redondeado al entero más cercano. Quincenales: hasta 1 visita en semanas 1–2 y hasta 2 en semanas 3–5. Las fechas de carga se conservan del planning. Verifica la semana sugerida y el total de semanas operativas para aplicar el cierre de mes.</p><div class="settings-grid"><label>CRUZ VERDE PROFUNDIDAD en el export<input id="depth-alias" value="CV TEST" /></label></div><div id="aliases"></div></details>
+        <details class="panel settings"><summary>Correcciones de auditor y exclusiones</summary><div class="settings-grid"><label>Correcciones de auditor<input id="auditor-overrides" placeholder="FOLIO=CODIGO, FOLIO=CODIGO" /><span class="note">Ejemplo: 12345678=100. Se aplica en todos los estudios y se recuerda en este navegador.</span></label><label>Folios a excluir de todos los estudios<input id="excluded-folios" placeholder="Ej. 12345678, 87654321" /><span class="note">Separados por comas. Se borran al recargar la página.</span></label></div><p class="note">Las correcciones y exclusiones se muestran en el resumen. El Excel original permanece intacto.</p></details>
+        <div class="action-bar"><p id="ready-note">Carga la planeación y el universo para empezar.</p><button class="primary" id="generate" type="submit">Generar selección <span>→</span></button></div>
+      </form>
+      <div id="status" role="status" aria-live="polite"></div>
+      <section id="results" class="panel results" hidden></section>
+    </main><footer>Chile · Planeación de campo<span>Los Excel y las visitas permanecen en tu navegador.</span></footer>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
