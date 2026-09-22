@@ -40,12 +40,79 @@ test('eight records from seven different SOVI are incomplete',()=>{
   const visits=SOVI.slice(0,7).map(s=>visit(s,1));visits.push(visit(SOVI[0],1,'2026-09-09'));
   const h=buildHistory(visits,{month:'2026-09',start:'2026-09-21',aliases:DEFAULT_ALIASES});assert.equal(h.soviCount('1'),0);
 });
-test('quincenales use first-half quota 1 and second-half quota 2',()=>{
-  for(const week of [1,2,3,4,5]){
-    const f=fixture();f.options.week=week;f.universe.filter(r=>r.client==='EMBONOR').forEach(r=>r.frequency='QUINCENALES');
-    f.report=[visit(OSA,2),visit(OSA,3),visit(OSA,3,'2026-09-15')];
-    const chosen=selected(select(f),OSA);assert(chosen.has('1'));assert.equal(chosen.has('2'),week>=3);assert(!chosen.has('3'));
+function setWeek(f,week){
+  const start=['2026-08-31','2026-09-07','2026-09-14','2026-09-21','2026-09-28'][week-1];
+  const end=['2026-09-05','2026-09-12','2026-09-19','2026-09-26','2026-10-03'][week-1];
+  f.options.week=week;f.hasReport=week>1;
+  for(const row of [...f.planning.rows,...f.planning.studies])Object.assign(row,{start,end});
+}
+test('OSA quincenales split by auditor then select only unfinished points of the half',()=>{
+  const f=fixture();f.universe.filter(r=>r.client==='EMBONOR').forEach(r=>r.frequency='QUINCENALES');setWeek(f,1);
+  const first=select(f);assert.equal(selected(first,OSA).size,6);
+  f.report=[...selected(first,OSA)].map(folio=>visit(OSA,folio,'2026-09-01'));setWeek(f,2);
+  const second=selected(select(f),OSA);assert.equal(second.size,4);for(const folio of second)assert(!selected(first,OSA).has(folio));
+});
+
+test('full five-week simulation yields exactly one measurement in each half for SOVI and every frequency-2 study',()=>{
+  for(const mode of ['fixed','fortnightly','mixed']){
+    const f=fixture();
+    f.universe.filter(r=>r.client==='EMBONOR'&&(mode==='fortnightly'||mode==='mixed'&&Number(r.folio)<=4)).forEach(r=>r.frequency='QUINCENALES');
+    const dates=['2026-09-01','2026-09-08','2026-09-15','2026-09-22','2026-09-29'];
+    const scheduled=[];
+    for(let week=1;week<=5;week++){
+      setWeek(f,week);const r=select(f);scheduled.push(r);
+      for(const name of SOVI)assert.deepEqual(selected(r,name),selected(r,SOVI[0]));
+      for(const name of REPLICAS)assert.deepEqual(selected(r,name),selected(r,OSA));
+      for(const folio of selected(r,SOVI[0]))assert(selected(r,OSA).has(folio));
+      f.report.push(...r.files.flatMap(file=>file.rows).map(row=>visit(row.study,row.folio,dates[week-1])));
+    }
+    for(const half of [0,2]){
+      const a=selected(scheduled[half],SOVI[0]),b=selected(scheduled[half+1],SOVI[0]);
+      assert.equal(new Set([...a,...b]).size,10);assert([...a].every(folio=>!b.has(folio)));
+    }
+    assert.equal(selected(scheduled[4],SOVI[0]).size,0);
+    const h=buildHistory(f.report,{month:'2026-09',start:'2026-09-30',week:5,aliases:DEFAULT_ALIASES});
+    for(const folio of Array.from({length:10},(_,i)=>String(i+1))){
+      assert.equal(h.soviCount(folio),2);assert.equal(h.soviHalfCount(folio,1),1);assert.equal(h.soviHalfCount(folio,2),1);
+      if(f.universe.find(r=>r.client==='EMBONOR'&&r.folio===folio).frequency==='QUINCENALES'){
+        assert.equal(h.count(OSA,folio),2);assert.equal(h.halfCount(OSA,folio,1),1);assert.equal(h.halfCount(OSA,folio,2),1);
+      }
+      if(f.universe.find(r=>r.client==='CRUZ VERDE'&&r.folio===folio).frequency===2)for(const name of CV){assert.equal(h.count(name,folio),2);assert.equal(h.halfCount(name,folio,1),1);assert.equal(h.halfCount(name,folio,2),1);}
+    }
   }
+});
+test('SOVI closing week selects every unfinished point even if more than half remain',()=>{
+  const f=fixture();setWeek(f,2);f.report=[...SOVI.map(s=>visit(s,1,'2026-09-01')),...SOVI.slice(0,7).map(s=>visit(s,2,'2026-09-01'))];
+  const chosen=selected(select(f),SOVI[0]);assert.equal(chosen.size,9);assert(!chosen.has('1'));assert(chosen.has('2'));
+});
+test('all SOVI are blocked once their current half is complete, even with fewer than two monthly visits',()=>{
+  const f=fixture();setWeek(f,4);f.report=SOVI.map(s=>visit(s,1,'2026-09-15'));
+  const r=select(f);assert(!selected(r,SOVI[0]).has('1'));const d=r.decisions.find(r=>r.study===SOVI[0]&&r.folio==='1');assert.equal(d.visitsFirstHalf,0);assert.equal(d.visitsSecondHalf,1);assert.match(d.reason,/no repetir/);
+});
+test('quincenales and CV frequency 2 do not duplicate a completed current half',()=>{
+  const f=fixture();setWeek(f,4);f.universe.find(r=>r.client==='EMBONOR'&&r.folio==='1').frequency='QUINCENALES';f.report=[OSA,...CV].map(s=>visit(s,1,'2026-09-15'));
+  const r=select(f);for(const s of [OSA,...CV])assert(!selected(r,s).has('1'));
+});
+test('two SOVI visits in the first half do not cause a third in the second; anomaly is visible',()=>{
+  const f=fixture();setWeek(f,3);f.report=['2026-09-01','2026-09-08'].flatMap(d=>SOVI.map(s=>visit(s,1,d)));
+  const r=select(f);assert(!selected(r,SOVI[0]).has('1'));assert(r.warnings.some(w=>w.includes('más de una medición')));
+});
+test('month boundaries use operational weeks instead of the 15th calendar day',()=>{
+  const h=buildHistory([visit(OSA,1,'2026-09-13'),visit(OSA,2,'2026-09-14')],{month:'2026-09',start:'2026-09-21',week:4,aliases:DEFAULT_ALIASES});
+  assert.equal(h.secondHalfStart,'2026-09-14');assert.equal(h.halfCount(OSA,'1',1),1);assert.equal(h.halfCount(OSA,'2',2),1);
+});
+test('closing SOVI cannot break OSA dependency when OSA is already completed',()=>{
+  const f=fixture();setWeek(f,2);f.universe.find(r=>r.client==='EMBONOR'&&r.folio==='1').frequency='QUINCENALES';f.report=[visit(OSA,1,'2026-09-01')];
+  const r=select(f);assert(!selected(r,OSA).has('1'));assert(!selected(r,SOVI[0]).has('1'));assert(r.warnings.some(w=>w.includes('SOVI pendientes')));
+});
+test('uneven CHECKOUT subset must not halve OSA quincenales again and strand them the following week',()=>{
+  const f=fixture();f.universe.filter(r=>r.client==='EMBONOR').forEach(r=>r.frequency='QUINCENALES');
+  f.planning.rows=f.planning.rows.filter(r=>!(r.study===SOVI[7]&&['4','5'].includes(r.folio)));
+  setWeek(f,1);const first=select(f);
+  for(const folio of ['1','2','3'])assert(selected(first,SOVI[0]).has(folio));
+  f.report=first.files.flatMap(file=>file.rows).map(row=>visit(row.study,row.folio,'2026-09-01'));
+  setWeek(f,2);const second=select(f);
+  assert.equal(new Set([...selected(first,SOVI[0]),...selected(second,SOVI[0])]).size,8);
 });
 test('SOVI quincenal needs a full eight-study visit to meet quota',()=>{
   const f=fixture();f.options.week=2;f.universe.filter(r=>r.client==='EMBONOR').forEach(r=>r.frequency='QUINCENALES');

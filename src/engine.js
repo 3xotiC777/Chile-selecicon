@@ -1,4 +1,5 @@
 // Pure selection rules. Dates are ISO calendar strings; identifiers remain strings.
+import { suggestPeriod } from './period.js';
 export const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toUpperCase();
 export const id = value => String(value ?? '').trim().replace(/\.0+$/, '');
 export const OSA = 'OSA BEBESTIBLES';
@@ -51,7 +52,12 @@ export function frequency(value) {
   if(['2','3','4'].includes(s))return Number(s);
   return null;
 }
-export function buildHistory(report, {month, start, aliases}) {
+export function buildHistory(report, {month, start, aliases, week=suggestPeriod(start).week}) {
+  // Anchor the operational halves to the planning week, not calendar day 15.
+  const boundary=new Date(monday(start)+'T00:00:00Z');
+  boundary.setUTCDate(boundary.getUTCDate()+(3-week)*7);
+  const secondHalfStart=boundary.toISOString().slice(0,10);
+  const halfOf=day=>monday(day)<secondHalfStart?1:2;
   const lookup=new Map();
   for(const [study,alias] of Object.entries(aliases)){
     const key=normalize(alias);
@@ -59,7 +65,7 @@ export function buildHistory(report, {month, start, aliases}) {
     if(lookup.has(key))fail(`El nombre del export «${alias}» se asignó a dos estudios.`);
     lookup.set(key,study);
   }
-  const totals=new Map(), soviWeeks=new Map(), seen=new Set(), seenNames=new Set();
+  const totals=new Map(), halfTotals=new Map(), soviWeeks=new Map(), seen=new Set(), seenNames=new Set();
   const stats={rows:report.length,valid:0,ignoredStatus:0,ignoredPeriod:0,duplicates:0,unrelated:0};
   const problems=[];
   for(const r of report){
@@ -75,6 +81,7 @@ export function buildHistory(report, {month, start, aliases}) {
     if(seen.has(key)){stats.duplicates++;continue;}
     seen.add(key);stats.valid++;
     const totalKey=JSON.stringify([study,r.folio]);totals.set(totalKey,(totals.get(totalKey)||0)+1);
+    const halfKey=JSON.stringify([study,r.folio,halfOf(day)]);halfTotals.set(halfKey,(halfTotals.get(halfKey)||0)+1);
     if(SOVI.includes(study)){
       const wk=monday(day);
       // Count completed past weeks; never merge components from different weeks.
@@ -86,13 +93,48 @@ export function buildHistory(report, {month, start, aliases}) {
     }
   }
   if(problems.length)fail('El export tiene visitas TERMINADO sin datos necesarios.',problems);
-  const sovi=new Map(), incomplete=new Map();
+  const sovi=new Map(), soviHalves=new Map(), incomplete=new Map();
   for(const [folio,weeks] of soviWeeks){
     let complete=0,partial=0;
-    for(const names of weeks.values()) names.size===8?complete++:partial++;
+    for(const [weekStart,names] of weeks){
+      if(names.size===8){
+        complete++;
+        const key=JSON.stringify([folio,halfOf(weekStart)]);soviHalves.set(key,(soviHalves.get(key)||0)+1);
+      }else partial++;
+    }
     sovi.set(folio,complete);if(partial)incomplete.set(folio,partial);
   }
-  return {stats,seenNames,incomplete,count:(study,folio)=>totals.get(JSON.stringify([study,folio]))||0,soviCount:folio=>sovi.get(folio)||0};
+  return {stats,seenNames,incomplete,secondHalfStart,
+    count:(study,folio)=>totals.get(JSON.stringify([study,folio]))||0,
+    halfCount:(study,folio,half)=>halfTotals.get(JSON.stringify([study,folio,half]))||0,
+    soviCount:folio=>sovi.get(folio)||0,
+    soviHalfCount:(folio,half)=>soviHalves.get(JSON.stringify([folio,half]))||0};
+}
+
+// Opening weeks use half of the cohort per auditor. Closing weeks select all
+// remaining points, including unsuccessful visits, without repeating completions.
+function chooseFortnight(rows,capacityRows,count,halfCount,week){
+  const half=week<=2?1:2,opening=week===1||week===3;
+  const groups=new Map();
+  for(const r of capacityRows){
+    if(!groups.has(r.auditor))groups.set(r.auditor,{auditor:r.auditor,name:r.auditorName,eligible:0,candidates:[]});
+    groups.get(r.auditor).eligible++;
+  }
+  for(const r of rows)if(count(r.folio)<2&&halfCount(r.folio,half)===0)groups.get(r.auditor)?.candidates.push(r);
+  const chosen=new Set(),auditors=[];
+  for(const group of groups.values()){
+    const pending=group.candidates.sort((a,b)=>count(a.folio)-count(b.folio)||compareId(a.folio,b.folio));
+    const selected=pending.slice(0,opening?Math.ceil(group.eligible/2):pending.length);
+    selected.forEach(r=>chosen.add(r.folio));
+    auditors.push({auditor:group.auditor,name:group.name,eligible:group.eligible,pending:pending.length,selected:selected.length});
+  }
+  return {chosen,auditors};
+}
+function fortnightReason(selected,total,inHalf,week){
+  if(total>=2)return 'Dos mediciones mensuales completadas';
+  if(inHalf>0)return 'Medición de esta quincena completada; no repetir';
+  if(selected)return week===1||week===3?'Primera mitad del auditor; pendiente en esta quincena':'Pendiente de la quincena: segunda mitad o visita no terminada';
+  return 'Reservado para la segunda semana de la quincena';
 }
 export function select({planning,universe,report=[],hasReport=false,options}) {
   const excluded=new Set((options.excludedFolios||[]).map(id));
@@ -119,7 +161,8 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(!isoDate(start)||!isoDate(end)||end<start)fail('Revisa las fechas de inicio y fin en RETAIL.');
   if(start.slice(0,7)!==month&&end.slice(0,7)!==month)fail(`El mes elegido (${month}) no coincide con la planeación (${start} a ${end}).`);
   const aliases={...DEFAULT_ALIASES,...options.aliases};
-  const history=buildHistory(report,{month,start,aliases});
+  const history=buildHistory(report,{month,start,aliases,week});
+  const half=week<=2?1:2;
   const warnings=[...(planning.warnings||[])];
   warnings.push(...new Set(corrections));
   if(excludedRows.length)warnings.push(`Exclusión manual de ${new Set(excludedRows.map(r=>r.folio)).size} folios en todos los estudios: ${[...new Set(excludedRows.map(r=>r.folio))].join(', ')}.`);
@@ -156,16 +199,23 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(history.incomplete.size)warnings.push(`${history.incomplete.size} folios tienen semanas SOVI incompletas: menos de 8 estudios distintos TERMINADO. Esas semanas no cuentan como visita SOVI.`);
   const assignments=new Map(planning.studies.map(s=>[s.name,new Set()])),decisions=[];
   const assign=(study,folio)=>assignments.get(study)?.add(folio);
-  const decide=(row,selected,visits,reason)=>{if(selected)assign(row.study,row.folio);decisions.push({...row,frequency:freq(row)??'mensual / completa',visits,selected,reason});};
+  const decide=(row,selected,visits,reason)=>{
+    if(selected)assign(row.study,row.folio);
+    const isSovi=SOVI.includes(row.study),isFortnightly=isSovi||row.study===OSA&&freq(row)==='fortnightly'||CV.includes(row.study)&&freq(row)===2;
+    const visitsFirstHalf=isFortnightly?(isSovi?history.soviHalfCount(row.folio,1):history.halfCount(row.study,row.folio,1)):null;
+    const visitsSecondHalf=isFortnightly?(isSovi?history.soviHalfCount(row.folio,2):history.halfCount(row.study,row.folio,2)):null;
+    decisions.push({...row,frequency:freq(row)??'mensual / completa',visits,visitsFirstHalf,visitsSecondHalf,selected,reason});
+  };
   const rank=count=>(a,b)=>count(a.folio)-count(b.folio)||compareId(a.folio,b.folio);
   const osaRows=rows(OSA),fixed=osaRows.filter(r=>freq(r)==='fixed');
   const fixedTarget=Math.round(fixed.length*(1-.17*holidays));
   const fixedChosen=new Set([...fixed].sort(rank(f=>history.count(OSA,f))).slice(0,fixedTarget).map(r=>r.folio));
-  const fortnightTarget=week<=2?1:2;
+  const osaQuincenal=osaRows.filter(r=>freq(r)==='fortnightly');
+  const osaFortnight=chooseFortnight(osaQuincenal,osaQuincenal,f=>history.count(OSA,f),(f,h)=>history.halfCount(OSA,f,h),week);
   for(const r of osaRows){
     const v=history.count(OSA,r.folio),isFixed=freq(r)==='fixed';
-    const yes=isFixed?fixedChosen.has(r.folio):v<fortnightTarget;
-    decide(r,yes,v,isFixed?(yes?'Fija semanal; prioridad por menor número de visitas':'Ajuste por feriado; fuera de la muestra de fijas'):(yes?`Quincenal pendiente: ${v}/${fortnightTarget}`:`Cuota quincenal alcanzada: ${v}/${fortnightTarget}`));
+    const yes=isFixed?fixedChosen.has(r.folio):osaFortnight.chosen.has(r.folio);
+    decide(r,yes,v,isFixed?(yes?'Fija semanal; prioridad por menor número de visitas':'Ajuste por feriado; fuera de la muestra de fijas'):fortnightReason(yes,v,history.halfCount(OSA,r.folio,half),week));
   }
   const osa=assignments.get(OSA)||new Set();
   if(!studies.has(OSA)&&[...REPLICAS,...SOVI,FACING].some(s=>studies.has(s)))fail('Falta OSA BEBESTIBLES, necesario para seleccionar Embonor.');
@@ -180,26 +230,33 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   }
   const soviPresent=SOVI.filter(s=>studies.has(s));
   if(soviPresent.length&&soviPresent.length!==8)fail('Para generar SOVI EMBONOR deben existir los ocho estudios.',SOVI.filter(s=>!studies.has(s)));
-  const soviEligible=osaRows.filter(r=>osa.has(r.folio)&&SOVI.every(s=>byStudy.get(s)?.has(r.folio)));
+  const soviBase=osaRows.filter(r=>SOVI.every(s=>byStudy.get(s)?.has(r.folio)));
+  const soviEligible=soviBase.filter(r=>osa.has(r.folio));
   if(soviPresent.length){
     const missing=osaRows.filter(r=>osa.has(r.folio)&&!SOVI.every(s=>byStudy.get(s)?.has(r.folio)));
     if(missing.length)warnings.push(`${missing.length} puntos seleccionados en OSA no son elegibles para SOVI porque no están habilitados en los ocho estudios. Se mantienen en OSA y pueden recibir Facing.`);
   }
   const sovi=new Set(),soviAuditors=[];
-  for(const r of soviEligible)if(freq(r)==='fortnightly'&&history.soviCount(r.folio)<fortnightTarget)sovi.add(r.folio);
-  const auditors=new Map();
-  for(const r of soviEligible.filter(r=>freq(r)==='fixed')){
-    if(!auditors.has(r.auditor))auditors.set(r.auditor,[]);auditors.get(r.auditor).push(r);
+  for(const type of ['fixed','fortnightly']){
+    const available=soviEligible.filter(r=>freq(r)===type);
+    // OSA already splits quincenales. Do not halve that same subset again.
+    const capacity=type==='fixed'?available:soviBase.filter(r=>freq(r)===type);
+    // Every eligible OSA quincenal must receive its SOVI while OSA is present.
+    // An uneven CHECKOUT subset can exceed half of the SOVI-only cohort; delaying
+    // it would strand it next week once its OSA half has already been completed.
+    const allocationWeek=type==='fortnightly'?(half===1?2:4):week;
+    const chosen=chooseFortnight(available,capacity,history.soviCount,history.soviHalfCount,allocationWeek);
+    chosen.chosen.forEach(f=>sovi.add(f));
+    soviAuditors.push(...chosen.auditors.map(a=>({...a,frequency:type})));
   }
-  for(const [auditor,list] of auditors){
-    const target=Math.ceil(list.length/2);
-    list.sort(rank(history.soviCount)).slice(0,target).forEach(r=>sovi.add(r.folio));
-    soviAuditors.push({auditor,name:list[0].auditorName,eligible:list.length,selected:target});
+  if(week===2||week>=4){
+    const blocked=soviBase.filter(r=>!osa.has(r.folio)&&history.soviCount(r.folio)<2&&history.soviHalfCount(r.folio,half)===0);
+    if(blocked.length)warnings.push(`${blocked.length} puntos SOVI pendientes de la quincena no se pueden seleccionar porque no están en OSA. Revisa estos cruces en el detalle; no se rompe la dependencia con OSA.`);
   }
   for(const s of SOVI)for(const r of rows(s)){
     if(sovi.has(r.folio)&&r.auditor!==byStudy.get(OSA).get(r.folio).auditor)fail(`Auditor inconsistente para el folio ${r.folio} en ${s}.`);
     const all=SOVI.every(n=>byStudy.get(n)?.has(r.folio)),yes=sovi.has(r.folio);
-    decide(r,yes,history.soviCount(r.folio),!osa.has(r.folio)?'No seleccionado en OSA':!all?'No habilitado en los ocho SOVI':yes?'SOVI: prioridad por visitas completas; mismo folio en 8 estudios':freq(r)==='fixed'?'Fuera de la mitad de fijas del auditor':'Cuota quincenal SOVI alcanzada');
+    decide(r,yes,history.soviCount(r.folio),!osa.has(r.folio)?'No seleccionado en OSA':!all?'No habilitado en los ocho SOVI':fortnightReason(yes,history.soviCount(r.folio),history.soviHalfCount(r.folio,half),week));
   }
   const last=week===weeks;let facingExceptions=0,facingUnreachable=0;
   for(const r of rows(FACING)){
@@ -211,14 +268,24 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   }
   if(facingExceptions)warnings.push(`Cierre de mes: ${facingExceptions} puntos Facing coinciden con SOVI para completar su visita mensual.`);
   if(facingUnreachable)warnings.push(`Cierre de mes: ${facingUnreachable} puntos Facing siguen pendientes y no están en OSA. No pueden asignarse sin OSA; revisa la planeación y la capacidad de fijas.`);
-  for(const s of CV)for(const r of rows(s)){
-    const v=history.count(s,r.folio),target=freq(r),yes=v<target;
-    decide(r,yes,v,yes?`Frecuencia mensual pendiente: ${v}/${target}`:`Frecuencia mensual cumplida: ${v}/${target}`);
+  for(const s of CV){
+    const quincenal=rows(s).filter(r=>freq(r)===2);
+    const selection=chooseFortnight(quincenal,quincenal,f=>history.count(s,f),(f,h)=>history.halfCount(s,f,h),week);
+    for(const r of rows(s)){
+      const v=history.count(s,r.folio),target=freq(r),yes=target===2?selection.chosen.has(r.folio):v<target;
+      decide(r,yes,v,target===2?fortnightReason(yes,v,history.halfCount(s,r.folio,half),week):yes?`Frecuencia mensual pendiente: ${v}/${target}`:`Frecuencia mensual cumplida: ${v}/${target}`);
+    }
   }
   for(const s of MONTHLY)for(const r of rows(s)){
     const v=history.count(s,r.folio);decide(r,v===0,v,v===0?'Visita mensual pendiente':'Visita mensual completada');
   }
   for(const s of ['POY','FERIAS LIBRES'])for(const r of rows(s))decide(r,true,null,'Carga completa');
+  const soviBaseFolios=new Set(soviBase.map(r=>r.folio));
+  const audited=decisions.filter(r=>r.visitsFirstHalf!==null&&(!SOVI.includes(r.study)||r.study===SOVI[0]&&soviBaseFolios.has(r.folio)));
+  const repeated=audited.filter(r=>r.visitsFirstHalf>1||r.visitsSecondHalf>1);
+  if(repeated.length)warnings.push(`${repeated.length} combinaciones de punto y estudio ya tienen más de una medición en una misma quincena. Se respeta el máximo de dos al mes; consulta los conteos por quincena en el detalle.`);
+  const missed=audited.filter(r=>week>=3&&r.visitsFirstHalf===0);
+  if(missed.length)warnings.push(`${missed.length} combinaciones de punto y estudio no completaron la primera quincena. Una visita en la segunda no recupera la medición de la primera; no se duplican visitas dentro de la misma quincena.`);
   const files=[];
   for(const s of planning.studies){
     if(SOVI.includes(s.name))continue;
@@ -226,8 +293,8 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   }
   if(soviPresent.length)files.push({name:'SOVI EMBONOR.csv',rows:SOVI.flatMap(s=>rows(s).filter(r=>sovi.has(r.folio)))});
   const selectedRows=files.flatMap(f=>f.rows);
-  return {files,decisions,warnings,history:history.stats,soviAuditors,period:{month,week,weeks,holidays,start,end},metrics:{points:new Set(selectedRows.map(r=>r.folio)).size,rows:selectedRows.length,files:files.length,auditors:new Set(selectedRows.map(r=>r.auditor)).size,osa:osa.size,sovi:sovi.size,facingExceptions,fixedTotal:fixed.length,fixedTarget}};
+  return {files,decisions,warnings,history:history.stats,soviAuditors,period:{month,week,weeks,holidays,start,end,half,secondHalfStart:history.secondHalfStart},metrics:{points:new Set(selectedRows.map(r=>r.folio)).size,rows:selectedRows.length,files:files.length,auditors:new Set(selectedRows.map(r=>r.auditor)).size,osa:osa.size,sovi:sovi.size,facingExceptions,fixedTotal:fixed.length,fixedTarget}};
 }
 function csvCell(value){const s=String(value??'');return /[;"\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
 export function csvRows(rows){return rows.map(r=>[r.folio,r.auditor,r.studyId,csvDate(r.start),csvDate(r.start),csvDate(r.end)].map(csvCell).join(';')).join('\r\n')+(rows.length?'\r\n':'');}
-export function reviewCsv(decisions){return '\uFEFF'+[['FOLIO','AUDITOR','ESTUDIO','FRECUENCIA','VISITAS_VALIDAS','SELECCIONADO','MOTIVO'],...decisions.map(r=>[r.folio,r.auditorName,r.study,r.frequency,r.visits,r.selected?'SI':'NO',r.reason])].map(r=>r.map(csvCell).join(';')).join('\r\n');}
+export function reviewCsv(decisions){return '\uFEFF'+[['FOLIO','AUDITOR','ESTUDIO','FRECUENCIA','VISITAS_VALIDAS','VISITAS_QUINCENA_1','VISITAS_QUINCENA_2','SELECCIONADO','MOTIVO'],...decisions.map(r=>[r.folio,r.auditorName,r.study,r.frequency,r.visits,r.visitsFirstHalf,r.visitsSecondHalf,r.selected?'SI':'NO',r.reason])].map(r=>r.map(csvCell).join(';')).join('\r\n');}
