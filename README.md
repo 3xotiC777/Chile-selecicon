@@ -11,7 +11,7 @@ Aplicación estática para preparar la selección semanal de auditorías. Lee la
 3. Cargar `UNIVERSO CHILE.xlsx` la primera vez. Se recuerda localmente y se puede reemplazar u olvidar.
 4. Elegir semana normal, un feriado o dos feriados.
 5. Si un código de auditor es incorrecto, usar **Correcciones de auditor** con `FOLIO=CODIGO`. Se aplica en todos los estudios, se muestra en el resumen y se recuerda en ese navegador. Las exclusiones manuales son independientes y se borran al recargar.
-6. Generar, revisar las observaciones y descargar el ZIP. El detalle con motivos se puede descargar por separado.
+6. Generar, revisar las observaciones y la carga por auditor, y descargar el ZIP. El detalle con motivos y el resumen de carga se pueden descargar por separado.
 
 Los archivos se procesan en un Web Worker en el navegador, sin subir datos a un servidor. El universo y las correcciones se guardan en almacenamiento local; el planning y el export permanecen en memoria. El repositorio y GitHub Pages contienen solamente código, nunca archivos operativos. No se ejecutan macros ni se modifican los Excel originales. Las fórmulas del planning se leen a partir de los valores guardados por Excel: recalcular y guardar el archivo antes de cargarlo si hubo cambios.
 
@@ -19,7 +19,7 @@ Los archivos se procesan en un Web Worker en el navegador, sin subir datos a un 
 
 | Grupo | Selección |
 | --- | --- |
-| OSA BEBESTIBLES fija | Todas cada semana. Con feriados: `round(N × (1 − 0.17 × feriados))`, sobre el total de folios fijos habilitados. Se prioriza menor cantidad de TERMINADO; empates por folio ascendente. |
+| OSA BEBESTIBLES fija | Todas cada semana. Con feriados: `round(N × (1 − 0.17 × feriados))`, sobre el total de folios fijos habilitados. Se prioriza menor cantidad de TERMINADO; en empate, el auditor con menos puntos seleccionados contando los otros estudios. |
 | OSA quincenal | Una medición por quincena, máximo dos mensuales. Semanas 1 y 3: mitad por auditor, redondeada hacia arriba. Semanas 2 y 4: todos los pendientes de esa quincena. Semana 5: pendientes de la segunda, sin repetir los completados. No se reduce por feriado. |
 | Equipos de frío, OSA ABI, OSA vinos y ambas exhibiciones Embonor | Exactamente los mismos folios de OSA. Si falta uno habilitado, se detiene la generación para corregir el planning. |
 | SOVI | Solo folios de OSA habilitados en los ocho estudios. Una visita válida requiere los ocho estudios distintos TERMINADO en la misma semana de lunes a domingo. Pueden ser días distintos. Se suman todas las semanas completas transcurridas del mes. No se combinan estudios de semanas diferentes. |
@@ -38,7 +38,17 @@ Una selección no cuenta como visita: solo el export TERMINADO confirma la medic
 
 Se advierte si no hubo medición en la primera quincena, si hay mediciones históricas repetidas dentro de una misma quincena o si un pendiente SOVI no está seleccionado en OSA. El sistema no puede garantizar la ejecución en campo ni recuperar una quincena pasada duplicando visitas en la siguiente. Se conserva siempre la dependencia con OSA.
 
-Las fijas OSA siempre se programan en semana normal, aunque hayan alcanzado cuatro visitas: su objetivo es una por semana de campo. La reducción por feriado afecta solo a fijas OSA y se propaga a estudios dependientes por su selección. No se distribuye un porcentaje distinto por auditor en esa reducción. El reparto quincenal de SOVI, OSA quincenal y Cruz Verde frecuencia 2 sí se calcula por auditor.
+Las fijas OSA siempre se programan en semana normal, aunque hayan alcanzado cuatro visitas: su objetivo es una por semana de campo. La reducción por feriado afecta solo a fijas OSA y se propaga a estudios dependientes por su selección. El reparto quincenal de SOVI, OSA quincenal y Cruz Verde frecuencia 2 se calcula por auditor.
+
+### Equilibrio de carga
+
+Se conserva el auditor de cada folio del planning (incluidas las correcciones explícitas). No se trasladan puntos entre rutas. Las frecuencias, los pendientes de cierre, las mitades por auditor y los cruces entre estudios tienen prioridad sobre el equilibrio.
+
+La selección de fijas con feriado cuenta primero los puntos comprometidos por Cruz Verde, Colgate, POY, FERIAS LIBRES y OSA quincenal. Entre fijas con igual número de visitas válidas, el siguiente punto se toma del auditor con menos puntos únicos seleccionados. La carga se actualiza con cada elección. Si también empata la carga, se favorece al que lleva menos fijas de esta muestra; los últimos desempates son código de auditor y folio ascendentes. Se conserva exactamente la muestra global calculada por feriado y se agotan los candidatos disponibles sin inventar puntos.
+
+El resumen **Carga de trabajo por auditor** muestra la base del planning, los puntos únicos seleccionados, todas las encuestas (filas CSV) y los puntos OSA, SOVI, Facing y Cruz Verde. Incluye auditores con cero seleccionados y se ordena de mayor a menor carga. Los ocho estudios SOVI son un punto de campo y ocho encuestas. El resumen tiene descarga independiente y no se agrega al ZIP de carga.
+
+Este equilibrio mejora la elección cuando existe margen dentro de las reglas. No garantiza la misma cantidad para todas las rutas: por ejemplo, en una semana normal hay que asignar todas las fijas, y en el cierre todos los pendientes quincenales, aunque un auditor tenga más puntos en su planning.
 
 ## Formatos
 

@@ -1,5 +1,6 @@
 // Pure selection rules. Dates are ISO calendar strings; identifiers remain strings.
 import { suggestPeriod } from './period.js';
+import { chooseBalanced,summarizeWorkload } from './workload.js';
 export const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toUpperCase();
 export const id = value => String(value ?? '').trim().replace(/\.0+$/, '');
 export const OSA = 'OSA BEBESTIBLES';
@@ -206,16 +207,30 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     const visitsSecondHalf=isFortnightly?(isSovi?history.soviHalfCount(row.folio,2):history.halfCount(row.study,row.folio,2)):null;
     decisions.push({...row,frequency:freq(row)??'mensual / completa',visits,visitsFirstHalf,visitsSecondHalf,selected,reason});
   };
-  const rank=count=>(a,b)=>count(a.folio)-count(b.folio)||compareId(a.folio,b.folio);
+  // Independent studies establish the route load before the discretionary
+  // holiday sample is chosen. Their frequency and closing rules stay intact.
+  for(const s of CV){
+    const quincenal=rows(s).filter(r=>freq(r)===2);
+    const selection=chooseFortnight(quincenal,quincenal,f=>history.count(s,f),(f,h)=>history.halfCount(s,f,h),week);
+    for(const r of rows(s)){
+      const v=history.count(s,r.folio),target=freq(r),yes=target===2?selection.chosen.has(r.folio):v<target;
+      decide(r,yes,v,target===2?fortnightReason(yes,v,history.halfCount(s,r.folio,half),week):yes?`Frecuencia mensual pendiente: ${v}/${target}`:`Frecuencia mensual cumplida: ${v}/${target}`);
+    }
+  }
+  for(const s of MONTHLY)for(const r of rows(s)){
+    const v=history.count(s,r.folio);decide(r,v===0,v,v===0?'Visita mensual pendiente':'Visita mensual completada');
+  }
+  for(const s of ['POY','FERIAS LIBRES'])for(const r of rows(s))decide(r,true,null,'Carga completa');
   const osaRows=rows(OSA),fixed=osaRows.filter(r=>freq(r)==='fixed');
   const fixedTarget=Math.round(fixed.length*(1-.17*holidays));
-  const fixedChosen=new Set([...fixed].sort(rank(f=>history.count(OSA,f))).slice(0,fixedTarget).map(r=>r.folio));
   const osaQuincenal=osaRows.filter(r=>freq(r)==='fortnightly');
   const osaFortnight=chooseFortnight(osaQuincenal,osaQuincenal,f=>history.count(OSA,f),(f,h)=>history.halfCount(OSA,f,h),week);
+  const committed=[...decisions.filter(r=>r.selected),...osaQuincenal.filter(r=>osaFortnight.chosen.has(r.folio))];
+  const fixedChosen=chooseBalanced(fixed,fixedTarget,f=>history.count(OSA,f),committed);
   for(const r of osaRows){
     const v=history.count(OSA,r.folio),isFixed=freq(r)==='fixed';
     const yes=isFixed?fixedChosen.has(r.folio):osaFortnight.chosen.has(r.folio);
-    decide(r,yes,v,isFixed?(yes?'Fija semanal; prioridad por menor número de visitas':'Ajuste por feriado; fuera de la muestra de fijas'):fortnightReason(yes,v,history.halfCount(OSA,r.folio,half),week));
+    decide(r,yes,v,isFixed?(yes?'Fija semanal; menos visitas y, en empate, menor carga por auditor':'Ajuste por feriado; prioridad por visitas y carga del auditor'):fortnightReason(yes,v,history.halfCount(OSA,r.folio,half),week));
   }
   const osa=assignments.get(OSA)||new Set();
   if(!studies.has(OSA)&&[...REPLICAS,...SOVI,FACING].some(s=>studies.has(s)))fail('Falta OSA BEBESTIBLES, necesario para seleccionar Embonor.');
@@ -268,18 +283,6 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   }
   if(facingExceptions)warnings.push(`Cierre de mes: ${facingExceptions} puntos Facing coinciden con SOVI para completar su visita mensual.`);
   if(facingUnreachable)warnings.push(`Cierre de mes: ${facingUnreachable} puntos Facing siguen pendientes y no están en OSA. No pueden asignarse sin OSA; revisa la planeación y la capacidad de fijas.`);
-  for(const s of CV){
-    const quincenal=rows(s).filter(r=>freq(r)===2);
-    const selection=chooseFortnight(quincenal,quincenal,f=>history.count(s,f),(f,h)=>history.halfCount(s,f,h),week);
-    for(const r of rows(s)){
-      const v=history.count(s,r.folio),target=freq(r),yes=target===2?selection.chosen.has(r.folio):v<target;
-      decide(r,yes,v,target===2?fortnightReason(yes,v,history.halfCount(s,r.folio,half),week):yes?`Frecuencia mensual pendiente: ${v}/${target}`:`Frecuencia mensual cumplida: ${v}/${target}`);
-    }
-  }
-  for(const s of MONTHLY)for(const r of rows(s)){
-    const v=history.count(s,r.folio);decide(r,v===0,v,v===0?'Visita mensual pendiente':'Visita mensual completada');
-  }
-  for(const s of ['POY','FERIAS LIBRES'])for(const r of rows(s))decide(r,true,null,'Carga completa');
   const soviBaseFolios=new Set(soviBase.map(r=>r.folio));
   const audited=decisions.filter(r=>r.visitsFirstHalf!==null&&(!SOVI.includes(r.study)||r.study===SOVI[0]&&soviBaseFolios.has(r.folio)));
   const repeated=audited.filter(r=>r.visitsFirstHalf>1||r.visitsSecondHalf>1);
@@ -293,7 +296,8 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   }
   if(soviPresent.length)files.push({name:'SOVI EMBONOR.csv',rows:SOVI.flatMap(s=>rows(s).filter(r=>sovi.has(r.folio)))});
   const selectedRows=files.flatMap(f=>f.rows);
-  return {files,decisions,warnings,history:history.stats,soviAuditors,period:{month,week,weeks,holidays,start,end,half,secondHalfStart:history.secondHalfStart},metrics:{points:new Set(selectedRows.map(r=>r.folio)).size,rows:selectedRows.length,files:files.length,auditors:new Set(selectedRows.map(r=>r.auditor)).size,osa:osa.size,sovi:sovi.size,facingExceptions,fixedTotal:fixed.length,fixedTarget}};
+  const workload=summarizeWorkload(planning.rows,selectedRows);
+  return {files,decisions,warnings,history:history.stats,soviAuditors,workload,period:{month,week,weeks,holidays,start,end,half,secondHalfStart:history.secondHalfStart},metrics:{points:new Set(selectedRows.map(r=>r.folio)).size,rows:selectedRows.length,files:files.length,auditors:new Set(selectedRows.map(r=>r.auditor)).size,osa:osa.size,sovi:sovi.size,facingExceptions,fixedTotal:fixed.length,fixedTarget}};
 }
 function csvCell(value){const s=String(value??'');return /[;"\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
 export function csvRows(rows){return rows.map(r=>[r.folio,r.auditor,r.studyId,csvDate(r.start),csvDate(r.start),csvDate(r.end)].map(csvCell).join(';')).join('\r\n')+(rows.length?'\r\n':'');}

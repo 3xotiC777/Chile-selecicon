@@ -131,6 +131,20 @@ test('holiday reduction leaves eligible quincenales intact',()=>{
   const f=fixture();f.options.holidays=2;f.universe.find(r=>r.client==='EMBONOR'&&r.folio==='1').frequency='QUINCENALES';
   const r=select(f);assert.equal(r.metrics.fixedTarget,6);assert.equal(selected(r,OSA).size,7);assert(selected(r,OSA).has('1'));
 });
+test('holiday ties use all committed study loads, preserve auditors and propagate through dependencies',()=>{
+  const f=fixture();f.options.holidays=2;
+  const extra=Array.from({length:5},(_,i)=>({...f.planning.rows.find(r=>r.study==='POY'),folio:String(100+i)}));
+  f.planning.rows.push(...extra);
+  const original=structuredClone(f.planning);
+  const r=select(f),osa=r.files.find(file=>file.name===OSA+'.csv').rows;
+  assert.deepEqual([osa.filter(r=>r.auditor==='101').length,osa.filter(r=>r.auditor==='102').length],[2,5]);
+  for(const study of REPLICAS)assert.deepEqual(selected(r,study),selected(r,OSA));
+  for(const study of SOVI)for(const folio of selected(r,study))assert(selected(r,OSA).has(folio));
+  for(const row of r.files.flatMap(file=>file.rows))assert.equal(row.auditor,original.rows.find(source=>source.study===row.study&&source.folio===row.folio).auditor);
+  assert.deepEqual(f.planning,original);
+  assert.equal(r.workload.reduce((sum,a)=>sum+a.assignments,0),r.metrics.rows);
+  for(const a of r.workload)assert.equal(a.points,new Set(r.files.flatMap(file=>file.rows).filter(row=>row.auditor===a.auditor).map(row=>row.folio)).size);
+});
 test('SOVI fixed quota rounds up independently for each auditor and prioritizes zero visits',()=>{
   const f=fixture();f.report=SOVI.map(s=>visit(s,1));const r=select(f);
   assert(!selected(r,SOVI[0]).has('1'));assert.deepEqual(r.soviAuditors.map(a=>a.selected),[3,3]);
