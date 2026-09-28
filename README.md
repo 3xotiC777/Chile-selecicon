@@ -6,12 +6,16 @@ Aplicación estática para preparar la selección semanal de auditorías. Lee la
 
 ## Uso
 
-1. Cargar la planeación `.xlsm` o `.xlsx`. La página sugiere mes, semana y total de semanas; comprobar estos valores según el calendario operativo. Si un mes abarca seis bloques de calendario, elegir manualmente las cuatro o cinco semanas de campo utilizadas por la operación.
+1. Elegir el mes, la semana y el total de semanas operativas, y cargar la planeación `.xlsm` o `.xlsx`. La carga respeta el período elegido, incluso si se cambia mientras se lee el archivo. Si aún no se ha elegido un período, la página sugiere uno a partir de las fechas de RETAIL. Si una semana cruza dos meses, elegir el mes y la semana de la operación; el nombre del archivo no determina ese período.
 2. Cargar el export de visitas. Es opcional en semana 1 y obligatorio desde semana 2.
 3. Cargar `UNIVERSO CHILE.xlsx` la primera vez. Se recuerda localmente y se puede reemplazar u olvidar.
 4. Elegir semana normal, un feriado o dos feriados.
 5. Si un código de auditor es incorrecto, usar **Correcciones de auditor** con `FOLIO=CODIGO`. Se aplica en todos los estudios, se muestra en el resumen y se recuerda en ese navegador. Las exclusiones manuales son independientes y se borran al recargar.
 6. Generar, revisar las observaciones y la carga por auditor, y descargar el ZIP. El detalle con motivos y el resumen de carga se pueden descargar por separado.
+
+Si un planning copiado conserva fechas antiguas, corregir las filas 2 y 3 de RETAIL o activar **Usar otras fechas de carga** e indicar inicio y fin. La corrección explícita se aplica a todos los CSV, al corte del export y al cálculo de las quincenas; se muestra en las observaciones y no modifica el Excel. Debe abarcar como máximo siete días e incluir el mes seleccionado. Se desactiva al subir otro planning para evitar arrastrar fechas de un archivo anterior.
+
+Ejemplo: para octubre de 2026, semana operativa 1, del **28/09/2026 al 03/10/2026**, seleccionar **octubre / semana 1**. El export sigue siendo opcional. Si RETAIL todavía dice 21/09–26/09, hay que corregir las fechas del Excel o indicarlas en la página antes de generar; cambiar solamente el nombre del archivo no cambia sus fechas.
 
 Los archivos se procesan en un Web Worker en el navegador, sin subir datos a un servidor. El universo y las correcciones se guardan en almacenamiento local; el planning y el export permanecen en memoria. El repositorio y GitHub Pages contienen solamente código, nunca archivos operativos. No se ejecutan macros ni se modifican los Excel originales. Las fórmulas del planning se leen a partir de los valores guardados por Excel: recalcular y guardar el archivo antes de cargarlo si hubo cambios.
 
@@ -28,6 +32,7 @@ Los archivos se procesan en un Web Worker en el navegador, sin subir datos a un 
 | Facing ABI | Visitas de FACING CERVEZAS 2. Una al mes para todos los puntos: requiere OSA y cero visitas, sin SOVI. En la última semana declarada se permite coincidir con SOVI. Si queda un pendiente sin OSA, se informa sin romper esa dependencia. |
 | Cruz Verde | Cada estudio por separado. Frecuencia 2: una medición por quincena con el mismo reparto por mitades que OSA quincenal. Frecuencias 3 y 4: se asigna si faltan visitas para la cuota mensual. CRUZ VERDE PROFUNDIDAD corresponde a CV TEST en el export. |
 | Colgate | PRECIOS COLGATE, EXHIBICIONES COLGATE y COLGATE PROMOCIONES FARMACIAS: solo cero TERMINADO en su propio estudio del mes. |
+| CENCOSUD | Una visita mensual. Seleccionar solo puntos sin TERMINADO de CENCOSUD en el mes. Nombre del export configurable. |
 | POY y FERIAS LIBRES | Carga completa. |
 
 El conteo se filtra por `DIA` de la visita, mes elegido y fecha anterior al inicio del planning. `DIA SINCRO` no determina la semana. Para SOVI solo cuentan semanas previas a la semana de inicio del planning. Una semana aporta como máximo una visita SOVI, aunque un componente tenga encuestas repetidas. Los registros repetidos con el mismo ID de VISITA, estudio y folio se cuentan una vez; si no hay ID se deduplica por estudio, folio y día.
@@ -44,7 +49,7 @@ Las fijas OSA siempre se programan en semana normal, aunque hayan alcanzado cuat
 
 Se conserva el auditor de cada folio del planning (incluidas las correcciones explícitas). No se trasladan puntos entre rutas. Las frecuencias, los pendientes de cierre, las mitades por auditor y los cruces entre estudios tienen prioridad sobre el equilibrio.
 
-La selección de fijas con feriado cuenta primero los puntos comprometidos por Cruz Verde, Colgate, POY, FERIAS LIBRES y OSA quincenal. Entre fijas con igual número de visitas válidas, el siguiente punto se toma del auditor con menos puntos únicos seleccionados. La carga se actualiza con cada elección. Si también empata la carga, se favorece al que lleva menos fijas de esta muestra; los últimos desempates son código de auditor y folio ascendentes. Se conserva exactamente la muestra global calculada por feriado y se agotan los candidatos disponibles sin inventar puntos.
+La selección de fijas con feriado cuenta primero los puntos comprometidos por Cruz Verde, Colgate, Cencosud, POY, FERIAS LIBRES y OSA quincenal. Entre fijas con igual número de visitas válidas, el siguiente punto se toma del auditor con menos puntos únicos seleccionados. La carga se actualiza con cada elección. Si también empata la carga, se favorece al que lleva menos fijas de esta muestra; los últimos desempates son código de auditor y folio ascendentes. Se conserva exactamente la muestra global calculada por feriado y se agotan los candidatos disponibles sin inventar puntos.
 
 El resumen **Carga de trabajo por auditor** muestra la base del planning, los puntos únicos seleccionados, todas las encuestas (filas CSV) y los puntos OSA, SOVI, Facing y Cruz Verde. Incluye auditores con cero seleccionados y se ordena de mayor a menor carga. Los ocho estudios SOVI son un punto de campo y ocho encuestas. El resumen tiene descarga independiente y no se agrega al ZIP de carga.
 

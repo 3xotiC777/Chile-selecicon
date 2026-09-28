@@ -8,7 +8,7 @@ export const REPLICAS = ['OSA VINOS EMBONOR','EXHIBICIONES ADICIONALES EMBONOR',
 export const SOVI = ['SOVI EMBONOR EXHIBICIONES COMPETENCIA','SOVI EMBONOR SSD','SOVI EMBONOR JUGOS','SOVI EMBONOR AGUAS','SOVI EMBONOR ENERGETICAS','SOVI EMBONOR ISOTONICOS','SOVI EMBONOR COOLER','SOVI EMBONOR CHECKOUT'];
 export const FACING = 'FACING ABI EMBONOR';
 export const CV = ['QUIEBRES CRUZ VERDE','CRUZ VERDE PROFUNDIDAD'];
-export const MONTHLY = ['PRECIOS COLGATE','EXHIBICIONES COLGATE','COLGATE PROMOCIONES FARMACIAS'];
+export const MONTHLY = ['PRECIOS COLGATE','EXHIBICIONES COLGATE','COLGATE PROMOCIONES FARMACIAS','CENCOSUD'];
 export const DEFAULT_ALIASES = {
   [OSA]: 'OSA BEBESTIBLES 2',
   [FACING]: 'FACING CERVEZAS 2',
@@ -17,6 +17,7 @@ export const DEFAULT_ALIASES = {
   'PRECIOS COLGATE':'PRECIOS COLGATE',
   'EXHIBICIONES COLGATE':'EXHIBICIONES COLGATE',
   'COLGATE PROMOCIONES FARMACIAS':'COLGATE PROMOCIONES FARMACIAS',
+  'CENCOSUD':'CENCOSUD',
   'SOVI EMBONOR EXHIBICIONES COMPETENCIA':'SOVI EXHIBICIONES COMPETENCIA',
   'SOVI EMBONOR SSD':'SOVI GONDOLA SSD 2',
   'SOVI EMBONOR JUGOS':'SOVI GONDOLA JUGOS 2',
@@ -138,6 +139,15 @@ function fortnightReason(selected,total,inHalf,week){
   return 'Reservado para la segunda semana de la quincena';
 }
 export function select({planning,universe,report=[],hasReport=false,options}) {
+  let dateWarning=null;
+  if(options.dateOverride){
+    const start=isoDate(options.dateOverride.start),end=isoDate(options.dateOverride.end);
+    if(!start||!end||end<start)fail('Indica fechas de carga válidas: inicio y fin, con fin igual o posterior al inicio.');
+    if((new Date(end)-new Date(start))/86400000>6)fail('Las fechas de carga deben abarcar una sola semana (máximo siete días).');
+    const original=[...new Set(planning.studies.map(s=>`${s.start} a ${s.end}`))].join(', ');
+    dateWarning=`Fechas de carga ajustadas manualmente: ${start} a ${end}. Fechas originales de RETAIL: ${original}. Se aplican a todos los CSV y al corte del export; el Excel original no cambia.`;
+    planning={...planning,studies:planning.studies.map(s=>({...s,start,end})),rows:planning.rows.map(r=>({...r,start,end}))};
+  }
   const excluded=new Set((options.excludedFolios||[]).map(id));
   const excludedRows=planning.rows.filter(r=>excluded.has(r.folio));
   const corrections=[];
@@ -160,11 +170,12 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(starts.length!==1||ends.length!==1)fail('Los estudios deben compartir el mismo período semanal en RETAIL.',planning.studies.map(s=>`${s.name}: ${s.start} a ${s.end}`));
   const start=starts[0],end=ends[0];
   if(!isoDate(start)||!isoDate(end)||end<start)fail('Revisa las fechas de inicio y fin en RETAIL.');
-  if(start.slice(0,7)!==month&&end.slice(0,7)!==month)fail(`El mes elegido (${month}) no coincide con la planeación (${start} a ${end}).`);
+  if(start.slice(0,7)!==month&&end.slice(0,7)!==month)fail(`El mes elegido (${month}) no coincide con las fechas de carga (${start} a ${end}). Corrige las filas 2 y 3 de RETAIL o activa «Usar otras fechas de carga» e indica la semana correcta.`);
   const aliases={...DEFAULT_ALIASES,...options.aliases};
   const history=buildHistory(report,{month,start,aliases,week});
   const half=week<=2?1:2;
   const warnings=[...(planning.warnings||[])];
+  if(dateWarning)warnings.push(dateWarning);
   warnings.push(...new Set(corrections));
   if(excludedRows.length)warnings.push(`Exclusión manual de ${new Set(excludedRows.map(r=>r.folio)).size} folios en todos los estudios: ${[...new Set(excludedRows.map(r=>r.folio))].join(', ')}.`);
   const byStudy=new Map(planning.studies.map(s=>[s.name,new Map()]));

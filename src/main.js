@@ -6,7 +6,7 @@ const $=id=>document.getElementById(id);
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number=value=>Number(value).toLocaleString('es-CL');
 const CACHE='chile-universe-v1';
-let universe=null,result=null,zip=null,revision=0,periodRevision=0,busy=false,universeTask=null,planningTask=null;
+let universe=null,result=null,zip=null,revision=0,periodRevision=0,busy=false,universeTask=null,planningTask=null,planningDates=null;
 $('month').value=new Date().toISOString().slice(0,7);
 $('aliases').innerHTML=Object.entries(DEFAULT_ALIASES).filter(([name])=>name!=='CRUZ VERDE PROFUNDIDAD').map(([name,alias])=>`<label>${escape(name)}<input data-alias="${escape(name)}" value="${escape(alias)}" /></label>`).join('');
 function runWorker(task,data,progress){
@@ -28,18 +28,36 @@ function updatePeriod(){
   const schedule=week===1||week===3?'primera mitad por auditor.':week===5?'solo pendientes; sin tercera medición.':'segunda mitad y visitas pendientes de esta quincena.';
   $('period-note').textContent=`${week<3?'Primera':'Segunda'} quincena · ${schedule} Aplica a SOVI, OSA quincenal y Cruz Verde de frecuencia 2. ${week===weeks?'Última semana: Facing puede coincidir con SOVI para cerrar pendientes.':''} ${holidays?'Fijas OSA: '+(100-17*holidays)+' % de la base.':'Fijas OSA: todas las de la planeación.'}`;
   document.querySelectorAll('.week-track span').forEach((s,i)=>s.classList.toggle('active',i+1===week));$('track5').hidden=weeks===4;
+  updateDates();
   updateReady();
+}
+function updateDates(){
+  const manual=$('override-dates').checked;
+  $('manual-dates').hidden=!manual;
+  for(const name of ['load-start','load-end']){$(name).disabled=!manual;$(name).required=manual;}
+  const start=manual?$('load-start').value:planningDates?.start,end=manual?$('load-end').value:planningDates?.end;
+  const note=$('planning-dates-note');
+  if(!planningDates){note.textContent='El mes y la semana que elijas se conservarán al subir el planning.';return;}
+  const original=`Fechas guardadas en RETAIL: ${planningDates.start.split('-').reverse().join('/')} al ${planningDates.end.split('-').reverse().join('/')}.`;
+  const mismatch=start&&end&&start.slice(0,7)!==$('month').value&&end.slice(0,7)!==$('month').value;
+  note.textContent=original+' '+(mismatch?'Las fechas de carga no incluyen el mes elegido. Corrige las filas 2 y 3 de RETAIL o activa «Usar otras fechas de carga».':manual?'Se usarán las fechas indicadas abajo en todos los CSV y en el corte del export.':start.slice(0,7)!==end.slice(0,7)?'La semana cruza dos meses: elige el mes y la semana operativos que corresponden.':'Se usarán estas fechas en los CSV. El nombre del archivo no determina el período.');
 }
 function updateReady(){const missing=[];if(!$('planning').files.length)missing.push('planeación');if(!universe)missing.push('universo');if(Number($('week').value)>1&&!$('report').files.length)missing.push('export');$('ready-note').textContent=missing.length?'Falta cargar: '+missing.join(', ')+'.':'Archivos listos. Genera la selección y revisa el resumen.';}
 function updateUniverse(name){$('universe-name').textContent=`${name} · ${number(universe.length)} frecuencias`;$('universe').closest('.file-box').classList.add('loaded');$('forget').hidden=false;updateReady();}
 try{const cached=JSON.parse(localStorage.getItem(CACHE));if(cached?.version===1&&Array.isArray(cached.rows)&&cached.rows.length){universe=cached.rows;updateUniverse(cached.name);}}catch{/* Browser storage may be unavailable. */}
 $('forget').addEventListener('click',()=>{invalidate();universe=null;$('universe').value='';universeTask=null;try{localStorage.removeItem(CACHE);}catch{}$('universe-name').textContent='Selecciona UNIVERSO CHILE.xlsx';$('universe').closest('.file-box').classList.remove('loaded');$('forget').hidden=true;updateReady();});
-for(const name of ['month','week','weeks','holidays'])$(name).addEventListener('change',()=>{periodRevision++;invalidate();updatePeriod();});
+for(const name of ['month','week','weeks'])$(name).addEventListener('input',()=>{periodRevision++;invalidate();updatePeriod();});
+$('holidays').addEventListener('change',()=>{invalidate();updatePeriod();});
+for(const name of ['override-dates','load-start','load-end'])$(name).addEventListener('input',()=>{invalidate();updateDates();});
 document.querySelectorAll('[data-alias],#depth-alias,#excluded-folios,#auditor-overrides').forEach(input=>input.addEventListener('input',invalidate));
 try{$('auditor-overrides').value=localStorage.getItem('chile-auditor-overrides-v1')||'';}catch{}
 $('auditor-overrides').addEventListener('change',()=>{try{localStorage.setItem('chile-auditor-overrides-v1',$('auditor-overrides').value);}catch{}});
 for(const name of ['planning','report','universe'])$(name).addEventListener('change',async()=>{
   invalidate();const file=$(name).files[0],thisPeriodRevision=periodRevision;
+  if(name==='planning'){
+    planningDates=null;planningTask=null;
+    $('override-dates').checked=false;$('load-start').value='';$('load-end').value='';updateDates();
+  }
   $(name+'-name').textContent=file?file.name:'Selecciona un archivo';$(name).closest('.file-box').classList.toggle('loaded',!!file);updateReady();
   if(!file)return;
   if(name==='universe'){
@@ -48,7 +66,7 @@ for(const name of ['planning','report','universe'])$(name).addEventListener('cha
     try{await universeTask;}catch(e){if($('universe').files[0]===file){universe=null;showStatus(e.message,true,e.details);}}finally{updateReady();}
   }
   if(name==='planning'){
-    planningTask=(async()=>{const loaded=await runWorker('planning',await file.arrayBuffer());if($('planning').files[0]!==file)return;const p=loaded.data;$('planning-name').textContent=`${file.name} · ${p.start.split('-').reverse().join('/')} a ${p.end.split('-').reverse().join('/')}`;if(periodRevision===thisPeriodRevision){const suggested=suggestPeriod(p.start);$('month').value=suggested.month;$('week').value=String(suggested.week);$('weeks').value=String(suggested.weeks);updatePeriod();}})();
+    planningTask=(async()=>{const loaded=await runWorker('planning',await file.arrayBuffer());if($('planning').files[0]!==file)return;const p=loaded.data;planningDates=p;$('planning-name').textContent=`${file.name} · ${p.start.split('-').reverse().join('/')} a ${p.end.split('-').reverse().join('/')}`;if(thisPeriodRevision===0&&periodRevision===0){const suggested=suggestPeriod(p.start);$('month').value=suggested.month;$('week').value=String(suggested.week);$('weeks').value=String(suggested.weeks);}updatePeriod();})();
     try{await planningTask;}catch(e){if($('planning').files[0]===file)showStatus(e.message,true,e.details);}
   }
 });
@@ -77,6 +95,7 @@ $('selection-form').addEventListener('submit',async event=>{
     const planningFile=$('planning').files[0],reportFile=$('report').files[0];
     if(!planningFile)throw new Error('Carga el archivo de planeación.');
     const options={month:$('month').value,week:Number($('week').value),weeks:Number($('weeks').value),holidays:Number($('holidays').value),aliases:Object.fromEntries([...document.querySelectorAll('[data-alias]')].map(i=>[i.dataset.alias,i.value]))};
+    if($('override-dates').checked)options.dateOverride={start:$('load-start').value,end:$('load-end').value};
     options.aliases['CRUZ VERDE PROFUNDIDAD']=$('depth-alias').value;
     options.excludedFolios=$('excluded-folios').value.split(/[,;\s]+/).filter(Boolean);
     const correctionEntries=$('auditor-overrides').value.split(/[,;\n]+/).map(s=>s.trim()).filter(Boolean);

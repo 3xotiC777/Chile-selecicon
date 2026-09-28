@@ -21,6 +21,30 @@ test('first week works without report and keeps OSA replicas and 8 SOVI identica
   assert.equal(r.files.find(f=>f.name==='SOVI EMBONOR.csv').rows.length,48);
 });
 test('week 2 requires the report',()=>{const f=fixture();f.options.week=2;f.hasReport=false;assert.throws(()=>select(f),/export/);});
+test('October week 1 accepts September 28 to October 3 and explicitly overrides stale planning dates',()=>{
+  const f=fixture(),original=structuredClone(f.planning);
+  Object.assign(f.options,{month:'2026-10',week:1,dateOverride:{start:'2026-09-28',end:'2026-10-03'}});f.hasReport=false;
+  const r=select(f);
+  assert.equal(r.period.month,'2026-10');assert.equal(r.period.week,1);assert.equal(r.period.start,'2026-09-28');assert.equal(r.period.end,'2026-10-03');
+  assert.equal(r.period.secondHalfStart,'2026-10-12');
+  for(const file of r.files)for(const row of file.rows){assert.equal(row.start,'2026-09-28');assert.equal(row.end,'2026-10-03');assert.match(csvRows([row]),/28\/09\/2026;28\/09\/2026;03\/10\/2026/);}
+  assert.deepEqual(f.planning,original);assert(r.warnings.some(w=>w.includes('ajustadas manualmente')));
+});
+test('override dates also control visit cutoff and operational half boundaries',()=>{
+  const f=fixture();Object.assign(f.options,{month:'2026-10',week:2,dateOverride:{start:'2026-10-05',end:'2026-10-10'}});
+  f.report=[...SOVI.map(s=>visit(s,1,'2026-10-01')),visit(FACING,2,'2026-10-01'),visit(FACING,3,'2026-10-05')];
+  const r=select(f);assert(!selected(r,SOVI[0]).has('1'));assert(!selected(r,FACING).has('2'));
+  assert.equal(r.decisions.find(d=>d.study===FACING&&d.folio==='3').visits,0);
+  assert.equal(r.period.secondHalfStart,'2026-10-12');
+});
+test('month mismatch cannot silently generate CSVs with stale dates; invalid overrides are blocked',()=>{
+  const f=fixture();Object.assign(f.options,{month:'2026-10',week:1});f.hasReport=false;
+  assert.throws(()=>select(f),/Usar otras fechas de carga/);
+  for(const dates of [{start:'',end:''},{start:'2026-09-31',end:'2026-10-03'},{start:'2026-10-03',end:'2026-09-28'},{start:'2026-09-28',end:'2026-10-10'}]){
+    f.options.dateOverride=dates;assert.throws(()=>select(f),/fechas de carga/);
+  }
+  f.options.dateOverride={start:'2026-09-21',end:'2026-09-26'};assert.throws(()=>select(f),/no coincide/);
+});
 test('only TERMINADO in selected month and before planning start counts; duplicate IDs count once',()=>{
   const h=buildHistory([visit(OSA,1),visit(OSA,1),visit(OSA,1,'2026-08-08'),visit(OSA,1,'2026-09-21'),visit(OSA,1,'2026-09-10',{status:'RECHAZO'}),visit(OSA,1,'2026-09-11',{status:'VACIO'})],{month:'2026-09',start:'2026-09-21',aliases:DEFAULT_ALIASES});
   assert.equal(h.count(OSA,'1'),1);assert.equal(h.stats.duplicates,1);assert.equal(h.stats.ignoredStatus,2);assert.equal(h.stats.ignoredPeriod,2);
@@ -167,6 +191,12 @@ test('Cruz Verde counts each study separately and observes frequencies 2,3,4',()
 });
 test('Colgate is monthly and POY / FERIAS are complete',()=>{
   const f=fixture();f.report=MONTHLY.map(s=>visit(s,1));const r=select(f);for(const s of MONTHLY){assert.equal(selected(r,s).size,9);assert(!selected(r,s).has('1'));}assert.equal(selected(r,'POY').size,10);assert.equal(selected(r,'FERIAS LIBRES').size,10);
+});
+test('CENCOSUD is monthly and only its own TERMINADO in the selected month excludes a point',()=>{
+  const f=fixture();f.report=[visit('CENCOSUD',1),visit('CENCOSUD',2,'2026-09-08',{status:'RECHAZO'}),visit('CENCOSUD',3,'2026-08-08'),visit(OSA,4)];
+  const r=select(f);assert(!selected(r,'CENCOSUD').has('1'));
+  for(const folio of ['2','3','4'])assert(selected(r,'CENCOSUD').has(folio));
+  assert.equal(r.files.find(f=>f.name==='CENCOSUD.csv').rows.length,9);
 });
 test('missing frequencies and conflicting universe keys block output',()=>{
   const f=fixture();f.universe=f.universe.filter(r=>!(r.client==='EMBONOR'&&r.folio==='1'));assert.throws(()=>select(f),/frecuencias/);
