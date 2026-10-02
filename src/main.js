@@ -1,4 +1,5 @@
 import './style.css';
+import './planning-export.css';
 import { DEFAULT_ALIASES,reviewCsv } from './engine.js';
 import { suggestPeriod,operationalMonthStart } from './period.js';
 import { workloadCsv } from './workload.js';
@@ -9,6 +10,7 @@ const number=value=>Number(value).toLocaleString('es-CL');
 const CACHE='chile-universe-v1';
 let universe=null,result=null,zip=null,revision=0,periodRevision=0,busy=false,universeTask=null,planningTask=null,planningDates=null;
 const snapshots={},fileLabels={planning:'la planeación',report:'el export',universe:'el universo'};
+let planningOutputSource=null,markedPlanning=null;
 $('month').value=new Date().toISOString().slice(0,7);
 $('aliases').innerHTML=Object.entries(DEFAULT_ALIASES).filter(([name])=>name!=='CRUZ VERDE PROFUNDIDAD').map(([name,alias])=>`<label>${escape(name)}<input data-alias="${escape(name)}" value="${escape(alias)}" /></label>`).join('');
 function runWorker(task,data,progress){
@@ -21,7 +23,7 @@ function runWorker(task,data,progress){
     worker.postMessage({task,data});
   });
 }
-function invalidate(){revision++;result=null;zip=null;$('results').hidden=true;if(!busy)$('status').replaceChildren();}
+function invalidate(){revision++;result=null;zip=null;planningOutputSource=null;markedPlanning=null;$('results').hidden=true;if(!busy)$('status').replaceChildren();}
 function showStatus(message,error=false,details=[]){$('status').innerHTML=`<div class="status-message ${error?'error':busy?'busy':''}">${escape(message)}${details.length?`<details><summary>Ver ${number(details.length)} observaciones</summary><ul>${details.slice(0,150).map(d=>`<li>${escape(d)}</li>`).join('')}</ul>${details.length>150?'<p>Se muestran las primeras 150. Corrige los datos de origen para continuar.</p>':''}</details>`:''}</div>`;}
 function updatePeriod(){
   const week=Number($('week').value),weeks=Number($('weeks').value),holidays=Number($('holidays').value);
@@ -87,6 +89,28 @@ function renderResults(){
   const m=result.metrics;
   $('results').innerHTML=`<div class="result-header"><div><p class="eyebrow">SELECCIÓN GENERADA</p><h2>Lista para revisar y descargar</h2><p>${escape(result.period.start)} al ${escape(result.period.end)} · semana ${result.period.week} de ${result.period.weeks}</p></div><button type="button" id="download" class="primary">Descargar ZIP <span>↓</span></button></div><div class="metrics">${[[m.points,'Puntos únicos'],[m.rows,'Asignaciones'],[m.files,'Archivos CSV'],[m.auditors,'Auditores']].map(([n,label])=>`<div><strong>${number(n)}</strong><span>${label}</span></div>`).join('')}</div>${result.warnings.length?`<div class="warnings"><strong>Observaciones de la selección</strong><ul>${result.warnings.map(w=>`<li>${escape(w)}</li>`).join('')}</ul></div>`:''}<p class="note">Fijas OSA: ${number(m.fixedTarget)} de ${number(m.fixedTotal)}. SOVI: ${number(m.sovi)} puntos × 8 estudios. Export: ${number(result.history.valid)} encuestas válidas utilizadas; ${number(result.history.duplicates)} duplicadas omitidas.</p><div class="table-wrap"><table><thead><tr><th>Archivo de carga</th><th class="number">Puntos</th><th class="number">Filas</th></tr></thead><tbody>${result.files.map(f=>`<tr><td>${escape(f.name)}</td><td class="number">${number(new Set(f.rows.map(r=>r.folio)).size)}</td><td class="number">${number(f.rows.length)}</td></tr>`).join('')}</tbody></table></div><details><summary>Reparto de SOVI por auditor y frecuencia</summary><div class="table-wrap"><table><thead><tr><th>Auditor</th><th>Frecuencia</th><th class="number">Base de reparto</th><th class="number">Pendientes con OSA</th><th class="number">Seleccionados</th></tr></thead><tbody>${result.soviAuditors.map(a=>`<tr><td>${escape(a.name)} (${escape(a.auditor)})</td><td>${a.frequency==='fixed'?'Fija':'Quincenal'}</td><td class="number">${a.eligible}</td><td class="number">${a.pending}</td><td class="number">${a.selected}</td></tr>`).join('')}</tbody></table></div></details><details><summary>Revisar puntos y motivos de selección</summary><div class="detail-tools"><label>Buscar folio, auditor o estudio<input id="search" placeholder="Ej. folio o nombre del auditor" /></label><button type="button" class="text-button" id="review-download">Descargar detalle de revisión</button></div><p class="note">Quincena ${result.period.half} en curso; la segunda comienza el ${escape(result.period.secondHalfStart)}. Este detalle incluye seleccionados y excluidos, con las visitas de cada quincena. Se descarga por separado; el ZIP solo contiene los CSV de carga.</p><div id="decision-rows" class="detail-table"></div></details>`;
   $('results').hidden=false;
+  const downloads=document.createElement('div');downloads.className='result-downloads';
+  const zipButton=$('download');zipButton.replaceWith(downloads);downloads.append(zipButton);
+  const planningButton=document.createElement('button');planningButton.type='button';planningButton.id='planning-download';planningButton.className='secondary';planningButton.textContent='Descargar planning con selección';downloads.append(planningButton);
+  const planningNote=document.createElement('p');planningNote.className='note';planningNote.textContent='El planning conserva sus hojas, fórmulas y macros. RETAIL incluye SELECCIONADO: SÍ si el folio aparece en algún CSV de esta selección; NO en los demás puntos. Las fechas originales del Excel se conservan.';
+  $('results').querySelector('.result-header').after(planningNote);
+  planningButton.addEventListener('click',async()=>{
+    const source=planningOutputSource,thisRevision=revision;
+    if(!source)return;
+    planningButton.disabled=true;planningButton.textContent='Preparando planning…';
+    try{
+      if(!markedPlanning){
+        const loaded=await runWorker('markPlanning',{planning:source.bytes,points:source.points,selectedFolios:[...new Set(result.files.flatMap(f=>f.rows.map(r=>r.folio)))]},message=>showStatus(message));
+        if(thisRevision!==revision)return;
+        markedPlanning=loaded.bytes;
+      }
+      const extension=source.name.match(/\.(xlsm|xlsx)$/i)?.[0]||'.xlsx';
+      const name=source.name.replace(/\.(xlsm|xlsx)$/i,'')+`_SELECCION_${result.period.month}_S${result.period.week}`+extension;
+      download(markedPlanning,extension.toLowerCase()==='.xlsm'?'application/vnd.ms-excel.sheet.macroEnabled.12':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',name);
+      $('status').replaceChildren();
+    }catch(e){if(thisRevision===revision)showStatus(e.message,true,e.details);}
+    finally{planningButton.disabled=false;planningButton.textContent='Descargar planning con selección';}
+  });
   const workloadSection=document.createElement('details');
   workloadSection.id='workload';workloadSection.open=true;
   workloadSection.innerHTML=`<summary>Carga de trabajo por auditor</summary><p class="note">Se conserva el auditor del planning. En los empates de visitas para fijas con feriado, se favorece la ruta con menos puntos seleccionados, contando también los otros estudios. Los repartos por mitades y las visitas obligatorias pueden impedir cantidades iguales.</p><p class="note">Un folio cuenta como un punto, aunque tenga varios estudios. Encuestas incluye todas las filas de carga, también los ocho estudios SOVI. La columna SOVI muestra puntos únicos. Ordenado de mayor a menor cantidad de puntos.</p><button type="button" class="text-button" id="workload-download">Descargar carga por auditor</button><div class="table-wrap"><table><thead><tr><th>Auditor</th><th class="number">Puntos planning</th><th class="number">Puntos seleccionados</th><th class="number">Encuestas</th><th class="number">OSA</th><th class="number">SOVI</th><th class="number">Facing</th><th class="number">Cruz Verde</th></tr></thead><tbody>${result.workload.map(a=>`<tr><td>${escape(a.name)} (${escape(a.auditor)})</td><td class="number">${number(a.base)}</td><td class="number">${number(a.points)}</td><td class="number">${number(a.assignments)}</td><td class="number">${number(a.osa)}</td><td class="number">${number(a.sovi)}</td><td class="number">${number(a.facing)}</td><td class="number">${number(a.cruzVerde)}</td></tr>`).join('')}</tbody></table></div>`;
@@ -118,7 +142,7 @@ $('selection-form').addEventListener('submit',async event=>{
     showStatus('Leyendo archivos en tu navegador…');
     const loaded=await runWorker('select',{planning:planningSnapshot.bytes,report:reportFile?reportSnapshot.bytes:null,universe,options},message=>showStatus(message));
     if(submittedRevision!==revision){showStatus('Cambiaste los archivos o ajustes durante el cálculo. Genera de nuevo la selección.');return;}
-    result=loaded.data;zip=loaded.zip;renderResults();$('status').replaceChildren();$('results').scrollIntoView({behavior:'smooth',block:'start'});
+    result=loaded.data;zip=loaded.zip;planningOutputSource={bytes:planningSnapshot.bytes,points:loaded.points,name:planningFile.name};renderResults();$('status').replaceChildren();$('results').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){showStatus(e.message,true,e.details);}
   finally{busy=false;$('generate').disabled=false;$('generate').innerHTML='Generar selección <span>→</span>';$('selection-form').removeAttribute('aria-busy');}
 });

@@ -1,0 +1,4 @@
+.result-downloads{display:flex;flex-direction:column;gap:10px;flex-shrink:0}
+.secondary{background:#fff;color:var(--teal);border:1px solid var(--teal);padding:13px 18px;border-radius:7px;font-weight:500}
+.secondary:hover{background:#edf8f6}
+@media(max-width:850px){.result-header{align-items:stretch;flex-direction:column}.result-downloads{width:100%}}

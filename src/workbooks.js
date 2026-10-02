@@ -22,7 +22,7 @@ export function parsePlanning(bytes){
   if(!sheet?.['!ref'])throw new SelectionError('RETAIL está vacía.');
   const range=XLSX.utils.decode_range(sheet['!ref']);
   if(normalize(value(sheet,6,1))!=='FOLIOS'&&normalize(value(sheet,6,1))!=='FOLIO')throw new SelectionError('RETAIL no tiene el formato esperado: FOLIOS en B7.');
-  const studies=[],rows=[],warnings=[];let totalFound=false;
+  const studies=[],rows=[],points=[],warnings=[];let totalFound=false;
   for(let c=16;c<=range.e.c;c++){
     const name=normalize(value(sheet,6,c));
     if(name==='TOTAL'){totalFound=true;break;}
@@ -38,13 +38,14 @@ export function parsePlanning(bytes){
   for(let r=7;r<=range.e.r;r++){
     const folioValue=value(sheet,r,1);
     if(folioValue==null||id(folioValue)===''||Number(folioValue)===0)break;
+    points.push({folio:id(folioValue),sourceRow:r+1});
     const enabled=studies.filter(s=>Number(value(sheet,r,s.col))===1);
     if(!enabled.length)continue;
     const folio=requiredId(folioValue,`Folio B${r+1}`),auditor=id(value(sheet,r,15));
     const auditorName=String(value(sheet,r,16)??auditor).trim();
     for(const s of enabled)rows.push({folio,auditor,auditorName,study:s.name,studyId:s.studyId,start:s.start,end:s.end,sourceRow:r+1});
   }
-  return {studies,rows,warnings};
+  return {studies,rows,points,warnings};
 }
 function findTable(workbook,predicate,label){
   for(const name of workbook.SheetNames){

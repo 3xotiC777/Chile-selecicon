@@ -10,7 +10,9 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@xmldom/xmldom": "0.9.12",
     "fflate": "0.8.3",
+    "jszip": "3.10.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
