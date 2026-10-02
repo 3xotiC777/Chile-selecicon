@@ -45,6 +45,17 @@ test('month mismatch cannot silently generate CSVs with stale dates; invalid ove
   }
   f.options.dateOverride={start:'2026-09-21',end:'2026-09-26'};assert.throws(()=>select(f),/no coincide/);
 });
+test('October week 2 explains a stale cutoff and counts October visits after an explicit date correction',()=>{
+  const f=fixture();Object.assign(f.options,{month:'2026-10',week:2});
+  for(const row of [...f.planning.rows,...f.planning.studies])Object.assign(row,{start:'2026-09-28',end:'2026-10-03'});
+  f.report=[visit(OSA,1,'2026-10-01')];
+  const stale=select(f);assert.equal(stale.history.valid,0);
+  const warning=stale.warnings.find(w=>w.includes('no aporta visitas válidas'));
+  assert.match(warning,/2026-10/);assert.match(warning,/28\/09\/2026/);assert.match(warning,/Usar otras fechas de carga/);
+  f.options.dateOverride={start:'2026-10-05',end:'2026-10-10'};
+  const corrected=select(f);assert.equal(corrected.history.valid,1);
+  assert(!corrected.warnings.some(w=>w.includes('no aporta visitas válidas')));
+});
 test('only TERMINADO in selected month and before planning start counts; duplicate IDs count once',()=>{
   const h=buildHistory([visit(OSA,1),visit(OSA,1),visit(OSA,1,'2026-08-08'),visit(OSA,1,'2026-09-21'),visit(OSA,1,'2026-09-10',{status:'RECHAZO'}),visit(OSA,1,'2026-09-11',{status:'VACIO'})],{month:'2026-09',start:'2026-09-21',aliases:DEFAULT_ALIASES});
   assert.equal(h.count(OSA,'1'),1);assert.equal(h.stats.duplicates,1);assert.equal(h.stats.ignoredStatus,2);assert.equal(h.stats.ignoredPeriod,2);

@@ -206,7 +206,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(hasReport){
     const absent=relevant.filter(s=>!history.seenNames.has(normalize(aliases[s])));
     if(absent.length)warnings.push(`Sin registros en el export para: ${absent.map(s=>`${s} (${aliases[s]})`).join(', ')}. Se cuentan 0 visitas; comprueba que el export esté completo.`);
-    if(history.stats.valid===0)warnings.push('El export no aporta visitas válidas para el mes y fechas de esta selección. Comprueba el período antes de cargar el ZIP.');
+    if(history.stats.valid===0)warnings.push(`El export no aporta visitas válidas para el mes y fechas de esta selección. Solo se cuentan estudios configurados con estado TERMINADO, DIA del mes ${month} y anterior al inicio de carga (${csvDate(start)}). Si el planning conserva fechas de otra semana, activa «Usar otras fechas de carga» o corrige las filas 2 y 3 de RETAIL. Comprueba el período antes de cargar el ZIP.`);
   }
   if(history.incomplete.size)warnings.push(`${history.incomplete.size} folios tienen semanas SOVI incompletas: menos de 8 estudios distintos TERMINADO. Esas semanas no cuentan como visita SOVI.`);
   const assignments=new Map(planning.studies.map(s=>[s.name,new Set()])),decisions=[];

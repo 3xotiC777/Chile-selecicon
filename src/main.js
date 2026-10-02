@@ -2,11 +2,13 @@ import './style.css';
 import { DEFAULT_ALIASES,reviewCsv } from './engine.js';
 import { suggestPeriod } from './period.js';
 import { workloadCsv } from './workload.js';
+import { captureFile } from './files.js';
 const $=id=>document.getElementById(id);
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number=value=>Number(value).toLocaleString('es-CL');
 const CACHE='chile-universe-v1';
 let universe=null,result=null,zip=null,revision=0,periodRevision=0,busy=false,universeTask=null,planningTask=null,planningDates=null;
+const snapshots={},fileLabels={planning:'la planeación',report:'el export',universe:'el universo'};
 $('month').value=new Date().toISOString().slice(0,7);
 $('aliases').innerHTML=Object.entries(DEFAULT_ALIASES).filter(([name])=>name!=='CRUZ VERDE PROFUNDIDAD').map(([name,alias])=>`<label>${escape(name)}<input data-alias="${escape(name)}" value="${escape(alias)}" /></label>`).join('');
 function runWorker(task,data,progress){
@@ -42,10 +44,10 @@ function updateDates(){
   const mismatch=start&&end&&start.slice(0,7)!==$('month').value&&end.slice(0,7)!==$('month').value;
   note.textContent=original+' '+(mismatch?'Las fechas de carga no incluyen el mes elegido. Corrige las filas 2 y 3 de RETAIL o activa «Usar otras fechas de carga».':manual?'Se usarán las fechas indicadas abajo en todos los CSV y en el corte del export.':start.slice(0,7)!==end.slice(0,7)?'La semana cruza dos meses: elige el mes y la semana operativos que corresponden.':'Se usarán estas fechas en los CSV. El nombre del archivo no determina el período.');
 }
-function updateReady(){const missing=[];if(!$('planning').files.length)missing.push('planeación');if(!universe)missing.push('universo');if(Number($('week').value)>1&&!$('report').files.length)missing.push('export');$('ready-note').textContent=missing.length?'Falta cargar: '+missing.join(', ')+'.':'Archivos listos. Genera la selección y revisa el resumen.';}
+function updateReady(){const missing=[];if(!planningDates)missing.push('planeación');if(!universe)missing.push('universo');if((Number($('week').value)>1||$('report').files.length)&&!snapshots.report?.bytes)missing.push('export');$('ready-note').textContent=missing.length?'Falta cargar o terminar de leer: '+missing.join(', ')+'.':'Archivos listos. Genera la selección y revisa el resumen.';}
 function updateUniverse(name){$('universe-name').textContent=`${name} · ${number(universe.length)} frecuencias`;$('universe').closest('.file-box').classList.add('loaded');$('forget').hidden=false;updateReady();}
 try{const cached=JSON.parse(localStorage.getItem(CACHE));if(cached?.version===1&&Array.isArray(cached.rows)&&cached.rows.length){universe=cached.rows;updateUniverse(cached.name);}}catch{/* Browser storage may be unavailable. */}
-$('forget').addEventListener('click',()=>{invalidate();universe=null;$('universe').value='';universeTask=null;try{localStorage.removeItem(CACHE);}catch{}$('universe-name').textContent='Selecciona UNIVERSO CHILE.xlsx';$('universe').closest('.file-box').classList.remove('loaded');$('forget').hidden=true;updateReady();});
+$('forget').addEventListener('click',()=>{invalidate();universe=null;$('universe').value='';universeTask=null;delete snapshots.universe;try{localStorage.removeItem(CACHE);}catch{}$('universe-name').textContent='Selecciona UNIVERSO CHILE.xlsx';$('universe').closest('.file-box').classList.remove('loaded');$('forget').hidden=true;updateReady();});
 for(const name of ['month','week','weeks'])$(name).addEventListener('input',()=>{periodRevision++;invalidate();updatePeriod();});
 $('holidays').addEventListener('change',()=>{invalidate();updatePeriod();});
 for(const name of ['override-dates','load-start','load-end'])$(name).addEventListener('input',()=>{invalidate();updateDates();});
@@ -54,21 +56,29 @@ try{$('auditor-overrides').value=localStorage.getItem('chile-auditor-overrides-v
 $('auditor-overrides').addEventListener('change',()=>{try{localStorage.setItem('chile-auditor-overrides-v1',$('auditor-overrides').value);}catch{}});
 for(const name of ['planning','report','universe'])$(name).addEventListener('change',async()=>{
   invalidate();const file=$(name).files[0],thisPeriodRevision=periodRevision;
+  const snapshot=file?captureFile(file,fileLabels[name]):null;
+  snapshots[name]=snapshot;
   if(name==='planning'){
     planningDates=null;planningTask=null;
     $('override-dates').checked=false;$('load-start').value='';$('load-end').value='';updateDates();
   }
-  $(name+'-name').textContent=file?file.name:'Selecciona un archivo';$(name).closest('.file-box').classList.toggle('loaded',!!file);updateReady();
+  $(name+'-name').textContent=file?`${file.name} · Leyendo…`:'Selecciona un archivo';$(name).closest('.file-box').classList.remove('loaded');updateReady();
   if(!file)return;
   if(name==='universe'){
     universe=null;updateReady();
-    universeTask=(async()=>{const loaded=await runWorker('universe',await file.arrayBuffer());if($('universe').files[0]!==file)return;universe=loaded.data;try{localStorage.setItem(CACHE,JSON.stringify({version:1,name:file.name,rows:universe}));}catch{showStatus('Universo cargado. Este navegador no permite recordarlo: tendrás que cargarlo de nuevo la próxima vez.');}updateUniverse(file.name);})();
-    try{await universeTask;}catch(e){if($('universe').files[0]===file){universe=null;showStatus(e.message,true,e.details);}}finally{updateReady();}
+    universeTask=(async()=>{const loaded=await runWorker('universe',await snapshot.task);if(snapshots.universe!==snapshot)return;universe=loaded.data;try{localStorage.setItem(CACHE,JSON.stringify({version:1,name:file.name,rows:universe}));}catch{showStatus('Universo cargado. Este navegador no permite recordarlo: tendrás que cargarlo de nuevo la próxima vez.');}updateUniverse(file.name);})();
+    try{await universeTask;}catch(e){if(snapshots.universe===snapshot){universe=null;$('universe').value='';showStatus(e.message,true,e.details);}}finally{updateReady();}
   }
   if(name==='planning'){
-    planningTask=(async()=>{const loaded=await runWorker('planning',await file.arrayBuffer());if($('planning').files[0]!==file)return;const p=loaded.data;planningDates=p;$('planning-name').textContent=`${file.name} · ${p.start.split('-').reverse().join('/')} a ${p.end.split('-').reverse().join('/')}`;if(thisPeriodRevision===0&&periodRevision===0){const suggested=suggestPeriod(p.start);$('month').value=suggested.month;$('week').value=String(suggested.week);$('weeks').value=String(suggested.weeks);}updatePeriod();})();
-    try{await planningTask;}catch(e){if($('planning').files[0]===file)showStatus(e.message,true,e.details);}
+    planningTask=(async()=>{const loaded=await runWorker('planning',await snapshot.task);if(snapshots.planning!==snapshot)return;const p=loaded.data;planningDates=p;$('planning-name').textContent=`${file.name} · ${p.start.split('-').reverse().join('/')} a ${p.end.split('-').reverse().join('/')}`;$('planning').closest('.file-box').classList.add('loaded');if(thisPeriodRevision===0&&periodRevision===0){const suggested=suggestPeriod(p.start);$('month').value=suggested.month;$('week').value=String(suggested.week);$('weeks').value=String(suggested.weeks);}updatePeriod();})();
+    try{await planningTask;}catch(e){if(snapshots.planning===snapshot){$('planning').value='';showStatus(e.message,true,e.details);}}finally{updateReady();}
   }
+  if(name==='report'){
+    try{await snapshot.task;if(snapshots.report===snapshot){$('report-name').textContent=file.name;$('report').closest('.file-box').classList.add('loaded');}}
+    catch(e){if(snapshots.report===snapshot){$('report').value='';showStatus(e.message,true);}}
+    finally{updateReady();}
+  }
+  if(snapshots[name]===snapshot&&!$(name).closest('.file-box').classList.contains('loaded'))$(name+'-name').textContent=`${file.name} · No se pudo cargar`;
 });
 updatePeriod();
 function download(content,type,name){const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
@@ -90,10 +100,13 @@ $('selection-form').addEventListener('submit',async event=>{
   event.preventDefault();if(busy)return;invalidate();busy=true;const submittedRevision=revision;
   $('generate').disabled=true;$('generate').textContent='Procesando…';$('selection-form').setAttribute('aria-busy','true');
   try{
-    await Promise.all([universeTask,planningTask]);
+    const planningSnapshot=snapshots.planning,reportSnapshot=snapshots.report;
+    showStatus('Esperando la lectura de los archivos…');
+    await Promise.all([universeTask,planningTask,reportSnapshot?.task]);
+    if(submittedRevision!==revision){showStatus('Cambiaste los archivos o ajustes durante la lectura. Genera de nuevo la selección.');return;}
     if(!universe)throw new Error('Carga UNIVERSO CHILE.xlsx para cruzar las frecuencias.');
     const planningFile=$('planning').files[0],reportFile=$('report').files[0];
-    if(!planningFile)throw new Error('Carga el archivo de planeación.');
+    if(!planningFile||!planningSnapshot?.bytes)throw new Error('Carga el archivo de planeación.');
     const options={month:$('month').value,week:Number($('week').value),weeks:Number($('weeks').value),holidays:Number($('holidays').value),aliases:Object.fromEntries([...document.querySelectorAll('[data-alias]')].map(i=>[i.dataset.alias,i.value]))};
     if($('override-dates').checked)options.dateOverride={start:$('load-start').value,end:$('load-end').value};
     options.aliases['CRUZ VERDE PROFUNDIDAD']=$('depth-alias').value;
@@ -102,7 +115,7 @@ $('selection-form').addEventListener('submit',async event=>{
     if(correctionEntries.some(s=>!/^\d+\s*=\s*\d+$/.test(s)))throw new Error('Usa FOLIO=CODIGO en las correcciones de auditor, separados por comas.');
     options.auditorOverrides=Object.fromEntries(correctionEntries.map(s=>s.split('=').map(v=>v.trim())));
     showStatus('Leyendo archivos en tu navegador…');
-    const loaded=await runWorker('select',{planning:await planningFile.arrayBuffer(),report:reportFile?await reportFile.arrayBuffer():null,universe,options},message=>showStatus(message));
+    const loaded=await runWorker('select',{planning:planningSnapshot.bytes,report:reportFile?reportSnapshot.bytes:null,universe,options},message=>showStatus(message));
     if(submittedRevision!==revision){showStatus('Cambiaste los archivos o ajustes durante el cálculo. Genera de nuevo la selección.');return;}
     result=loaded.data;zip=loaded.zip;renderResults();$('status').replaceChildren();$('results').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){showStatus(e.message,true,e.details);}

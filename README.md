@@ -21,6 +21,8 @@ Los archivos se procesan en un Web Worker en el navegador, sin subir datos a un 
 
 ## Reglas implementadas
 
+La página lee los bytes al seleccionar cada archivo y reutiliza esa copia en memoria al generar. Espera a que la planeación muestre sus fechas y el estado indique «Archivos listos». Si no se puede leer un archivo sincronizado, el mensaje identifica cuál: marca **Mantener siempre en este dispositivo**, espera a la descarga y vuelve a seleccionarlo; también puedes usar una copia en Descargas. Si editas el Excel después de cargarlo, vuelve a seleccionarlo para usar la nueva versión.
+
 | Grupo | Selección |
 | --- | --- |
 | OSA BEBESTIBLES fija | Todas cada semana. Con feriados: `round(N × (1 − 0.17 × feriados))`, sobre el total de folios fijos habilitados. Se prioriza menor cantidad de TERMINADO; en empate, el auditor con menos puntos seleccionados contando los otros estudios. |
