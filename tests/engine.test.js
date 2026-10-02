@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {select,buildHistory,csvRows,isoDate,DEFAULT_ALIASES,OSA,REPLICAS,SOVI,FACING,CV,MONTHLY} from '../src/engine.js';
 const names=[OSA,...REPLICAS,...SOVI,FACING,...CV,...MONTHLY,'POY','FERIAS LIBRES'];
 function fixture(){
-  const studies=names.map((name,i)=>({name,studyId:String(i+100),start:'2026-09-21',end:'2026-09-26'}));
+  const studies=names.map((name,i)=>({name,studyId:String(i+100),start:'2026-09-14',end:'2026-09-19'}));
   const rows=studies.flatMap(s=>Array.from({length:10},(_,i)=>({folio:String(i+1),auditor:i<5?'101':'102',auditorName:i<5?'Auditor A':'Auditor B',study:s.name,studyId:s.studyId,start:s.start,end:s.end,sourceRow:i+8})));
   const universe=['EMBONOR','CRUZ VERDE'].flatMap(client=>Array.from({length:10},(_,i)=>({folio:String(i+1),client,frequency:client==='EMBONOR'?'FIJA':2+(i%3)})));
   return {planning:{studies,rows},universe,report:[],hasReport:true,options:{month:'2026-09',week:3,weeks:5,holidays:0}};
@@ -56,9 +56,24 @@ test('October week 2 explains a stale cutoff and counts October visits after an 
   const corrected=select(f);assert.equal(corrected.history.valid,1);
   assert(!corrected.warnings.some(w=>w.includes('no aporta visitas válidas')));
 });
-test('only TERMINADO in selected month and before planning start counts; duplicate IDs count once',()=>{
+test('only TERMINADO in the operational month and before planning start counts; duplicate IDs count once',()=>{
   const h=buildHistory([visit(OSA,1),visit(OSA,1),visit(OSA,1,'2026-08-08'),visit(OSA,1,'2026-09-21'),visit(OSA,1,'2026-09-10',{status:'RECHAZO'}),visit(OSA,1,'2026-09-11',{status:'VACIO'})],{month:'2026-09',start:'2026-09-21',aliases:DEFAULT_ALIASES});
   assert.equal(h.count(OSA,'1'),1);assert.equal(h.stats.duplicates,1);assert.equal(h.stats.ignoredStatus,2);assert.equal(h.stats.ignoredPeriod,2);
+});
+test('October history begins on September 28 and merges SOVI components across the calendar boundary',()=>{
+  const report=[visit(OSA,1,'2026-09-28'),visit(OSA,2,'2026-09-27'),visit(OSA,3,'2026-10-05'),...SOVI.map((study,i)=>visit(study,1,i<4?'2026-09-29':'2026-10-01'))];
+  const h=buildHistory(report,{month:'2026-10',start:'2026-10-05',week:2,aliases:DEFAULT_ALIASES});
+  assert.equal(h.operationalStart,'2026-09-28');assert.equal(h.secondHalfStart,'2026-10-12');
+  assert.equal(h.count(OSA,'1'),1);assert.equal(h.count(OSA,'2'),0);assert.equal(h.count(OSA,'3'),0);
+  assert.equal(h.soviCount('1'),1);assert.equal(h.soviHalfCount('1',1),1);assert.equal(h.stats.valid,9);assert.equal(h.stats.ignoredPeriod,2);
+});
+test('October week 2 excludes completed September visits from OSA quincenal, SOVI, CV and monthly studies',()=>{
+  const f=fixture();Object.assign(f.options,{month:'2026-10',week:2,dateOverride:{start:'2026-10-05',end:'2026-10-10'}});
+  f.universe.find(r=>r.client==='EMBONOR'&&r.folio==='1').frequency='QUINCENALES';
+  f.report=[OSA,...SOVI,...MONTHLY,...CV].map(study=>visit(study,1,'2026-09-28'));
+  const r=select(f);assert.equal(r.period.operationalStart,'2026-09-28');
+  for(const study of [OSA,...SOVI,...MONTHLY,...CV])assert(!selected(r,study).has('1'),study);
+  assert(!r.warnings.some(w=>w.includes('no aporta visitas válidas')));
 });
 test('SOVI can span days of the same week, but never different weeks',()=>{
   const visits=SOVI.map((s,i)=>visit(s,1,i<4?'2026-09-07':'2026-09-12'));
@@ -203,7 +218,7 @@ test('Cruz Verde counts each study separately and observes frequencies 2,3,4',()
 test('Colgate is monthly and POY / FERIAS are complete',()=>{
   const f=fixture();f.report=MONTHLY.map(s=>visit(s,1));const r=select(f);for(const s of MONTHLY){assert.equal(selected(r,s).size,9);assert(!selected(r,s).has('1'));}assert.equal(selected(r,'POY').size,10);assert.equal(selected(r,'FERIAS LIBRES').size,10);
 });
-test('CENCOSUD is monthly and only its own TERMINADO in the selected month excludes a point',()=>{
+test('CENCOSUD is monthly and only its own TERMINADO in the operational month excludes a point',()=>{
   const f=fixture();f.report=[visit('CENCOSUD',1),visit('CENCOSUD',2,'2026-09-08',{status:'RECHAZO'}),visit('CENCOSUD',3,'2026-08-08'),visit(OSA,4)];
   const r=select(f);assert(!selected(r,'CENCOSUD').has('1'));
   for(const folio of ['2','3','4'])assert(selected(r,'CENCOSUD').has(folio));

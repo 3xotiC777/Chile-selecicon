@@ -1,6 +1,6 @@
 import './style.css';
 import { DEFAULT_ALIASES,reviewCsv } from './engine.js';
-import { suggestPeriod } from './period.js';
+import { suggestPeriod,operationalMonthStart } from './period.js';
 import { workloadCsv } from './workload.js';
 import { captureFile } from './files.js';
 const $=id=>document.getElementById(id);
@@ -43,6 +43,7 @@ function updateDates(){
   const original=`Fechas guardadas en RETAIL: ${planningDates.start.split('-').reverse().join('/')} al ${planningDates.end.split('-').reverse().join('/')}.`;
   const mismatch=start&&end&&start.slice(0,7)!==$('month').value&&end.slice(0,7)!==$('month').value;
   note.textContent=original+' '+(mismatch?'Las fechas de carga no incluyen el mes elegido. Corrige las filas 2 y 3 de RETAIL o activa «Usar otras fechas de carga».':manual?'Se usarán las fechas indicadas abajo en todos los CSV y en el corte del export.':start.slice(0,7)!==end.slice(0,7)?'La semana cruza dos meses: elige el mes y la semana operativos que corresponden.':'Se usarán estas fechas en los CSV. El nombre del archivo no determina el período.');
+  if(start)note.textContent+=` Conteo del export: desde ${operationalMonthStart(start,Number($('week').value)).split('-').reverse().join('/')} hasta antes del ${start.split('-').reverse().join('/')}, incluyendo los días del mes anterior que pertenecen a la primera semana operativa.`;
 }
 function updateReady(){const missing=[];if(!planningDates)missing.push('planeación');if(!universe)missing.push('universo');if((Number($('week').value)>1||$('report').files.length)&&!snapshots.report?.bytes)missing.push('export');$('ready-note').textContent=missing.length?'Falta cargar o terminar de leer: '+missing.join(', ')+'.':'Archivos listos. Genera la selección y revisa el resumen.';}
 function updateUniverse(name){$('universe-name').textContent=`${name} · ${number(universe.length)} frecuencias`;$('universe').closest('.file-box').classList.add('loaded');$('forget').hidden=false;updateReady();}

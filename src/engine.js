@@ -1,5 +1,5 @@
 // Pure selection rules. Dates are ISO calendar strings; identifiers remain strings.
-import { suggestPeriod } from './period.js';
+import { suggestPeriod,operationalMonthStart } from './period.js';
 import { chooseBalanced,summarizeWorkload } from './workload.js';
 export const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toUpperCase();
 export const id = value => String(value ?? '').trim().replace(/\.0+$/, '');
@@ -56,8 +56,9 @@ export function frequency(value) {
 }
 export function buildHistory(report, {month, start, aliases, week=suggestPeriod(start).week}) {
   // Anchor the operational halves to the planning week, not calendar day 15.
-  const boundary=new Date(monday(start)+'T00:00:00Z');
-  boundary.setUTCDate(boundary.getUTCDate()+(3-week)*7);
+  const operationalStart=operationalMonthStart(start,week);
+  const boundary=new Date(operationalStart+'T00:00:00Z');
+  boundary.setUTCDate(boundary.getUTCDate()+14);
   const secondHalfStart=boundary.toISOString().slice(0,10);
   const halfOf=day=>monday(day)<secondHalfStart?1:2;
   const lookup=new Map();
@@ -75,7 +76,7 @@ export function buildHistory(report, {month, start, aliases, week=suggestPeriod(
     if(normalize(r.status)!=='TERMINADO'){stats.ignoredStatus++;continue;}
     const day=isoDate(r.day);
     if(!day){problems.push(`Visita ${r.visit||'(sin ID)'}, folio ${r.folio}: TERMINADO sin DIA válido.`);continue;}
-    if(!day.startsWith(month)||day>=start){stats.ignoredPeriod++;continue;}
+    if(day<operationalStart||day>=start){stats.ignoredPeriod++;continue;}
     const study=lookup.get(normalize(r.study));
     if(!study){stats.unrelated++;continue;}
     if(!r.folio){problems.push(`Visita ${r.visit||'(sin ID)'}: falta FOLIO.`);continue;}
@@ -106,7 +107,7 @@ export function buildHistory(report, {month, start, aliases, week=suggestPeriod(
     }
     sovi.set(folio,complete);if(partial)incomplete.set(folio,partial);
   }
-  return {stats,seenNames,incomplete,secondHalfStart,
+  return {stats,seenNames,incomplete,secondHalfStart,operationalStart,
     count:(study,folio)=>totals.get(JSON.stringify([study,folio]))||0,
     halfCount:(study,folio,half)=>halfTotals.get(JSON.stringify([study,folio,half]))||0,
     soviCount:folio=>sovi.get(folio)||0,
@@ -206,7 +207,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(hasReport){
     const absent=relevant.filter(s=>!history.seenNames.has(normalize(aliases[s])));
     if(absent.length)warnings.push(`Sin registros en el export para: ${absent.map(s=>`${s} (${aliases[s]})`).join(', ')}. Se cuentan 0 visitas; comprueba que el export esté completo.`);
-    if(history.stats.valid===0)warnings.push(`El export no aporta visitas válidas para el mes y fechas de esta selección. Solo se cuentan estudios configurados con estado TERMINADO, DIA del mes ${month} y anterior al inicio de carga (${csvDate(start)}). Si el planning conserva fechas de otra semana, activa «Usar otras fechas de carga» o corrige las filas 2 y 3 de RETAIL. Comprueba el período antes de cargar el ZIP.`);
+    if(history.stats.valid===0)warnings.push(`El export no aporta visitas válidas para el mes y fechas de esta selección. Para ${month}, solo se cuentan estudios configurados con estado TERMINADO y DIA desde el inicio del mes operativo (${csvDate(history.operationalStart)}) y anterior al inicio de carga (${csvDate(start)}). Si el planning conserva fechas de otra semana, activa «Usar otras fechas de carga» o corrige las filas 2 y 3 de RETAIL. Comprueba el período antes de cargar el ZIP.`);
   }
   if(history.incomplete.size)warnings.push(`${history.incomplete.size} folios tienen semanas SOVI incompletas: menos de 8 estudios distintos TERMINADO. Esas semanas no cuentan como visita SOVI.`);
   const assignments=new Map(planning.studies.map(s=>[s.name,new Set()])),decisions=[];
@@ -308,7 +309,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(soviPresent.length)files.push({name:'SOVI EMBONOR.csv',rows:SOVI.flatMap(s=>rows(s).filter(r=>sovi.has(r.folio)))});
   const selectedRows=files.flatMap(f=>f.rows);
   const workload=summarizeWorkload(planning.rows,selectedRows);
-  return {files,decisions,warnings,history:history.stats,soviAuditors,workload,period:{month,week,weeks,holidays,start,end,half,secondHalfStart:history.secondHalfStart},metrics:{points:new Set(selectedRows.map(r=>r.folio)).size,rows:selectedRows.length,files:files.length,auditors:new Set(selectedRows.map(r=>r.auditor)).size,osa:osa.size,sovi:sovi.size,facingExceptions,fixedTotal:fixed.length,fixedTarget}};
+  return {files,decisions,warnings,history:history.stats,soviAuditors,workload,period:{month,week,weeks,holidays,start,end,half,operationalStart:history.operationalStart,secondHalfStart:history.secondHalfStart},metrics:{points:new Set(selectedRows.map(r=>r.folio)).size,rows:selectedRows.length,files:files.length,auditors:new Set(selectedRows.map(r=>r.auditor)).size,osa:osa.size,sovi:sovi.size,facingExceptions,fixedTotal:fixed.length,fixedTarget}};
 }
 function csvCell(value){const s=String(value??'');return /[;"\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
 export function csvRows(rows){return rows.map(r=>[r.folio,r.auditor,r.studyId,csvDate(r.start),csvDate(r.start),csvDate(r.end)].map(csvCell).join(';')).join('\r\n')+(rows.length?'\r\n':'');}
