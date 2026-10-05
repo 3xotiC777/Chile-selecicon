@@ -1,8 +1,22 @@
 # Selección de campo · Chile
 
-Aplicación estática para preparar la selección semanal de auditorías. Lee la hoja RETAIL del planning, cruza las frecuencias del universo y cuenta visitas TERMINADO del export. Genera un ZIP con un CSV por estudio y un solo `SOVI EMBONOR.csv` con los ocho SOVI.
+Aplicación para preparar la selección semanal de auditorías y compartir el seguimiento de campo. Lee la hoja RETAIL del planning, cruza las frecuencias del universo y cuenta visitas TERMINADO del export. Genera un ZIP con un CSV por estudio y un solo `SOVI EMBONOR.csv` con los ocho SOVI.
 
-**Página:** https://3xotiC777.github.io/Chile-selecicon/
+**Portal compartido:** https://chile-seleccion.vercel.app/
+
+**Selección local:** https://3xotiC777.github.io/Chile-selecicon/
+
+## Seguimiento y acceso
+
+El portal de Vercel usa Supabase Auth. El primer administrador se crea mediante un enlace privado de activación de un solo uso, con token aleatorio cuyo hash y vencimiento están en un esquema privado. No hay registro público. El administrador crea y elimina usuarios en **Usuarios**; campo solo consulta y descarga. Cada usuario puede cambiar su contraseña.
+
+**Avance de campo** ofrece filtros por cliente, estudio, auditor, región, estado y puntos programados; avance mensual por estudio, detalle de pendientes, VACIO, RECHAZADO y mediciones SOVI incompletas. **Productividad** usa el auditor que realizó la encuesta y divide encuestas entre días con actividad registrados en el export. El tiempo promedio usa solo duraciones válidas y se pondera por encuestas. Los VACIO sin fecha se muestran como pendientes del export; no aportan visitas cumplidas ni días de productividad. Precios y fotografías CENCOSUD tienen metas mensuales independientes.
+
+La carga de **Actualizar seguimiento** reemplaza únicamente el export. Las planeaciones semanales se conservan y cualquier usuario puede volver a descargar sus ZIP. **Base de seguimiento** permite cargar RETAIL y universo sin generar una selección. En **Planeación**, generar y revisar los CSV y pulsar **Guardar planeación compartida** para registrar la programación de esa semana. Guardar una selección no confirma ejecución: solo TERMINADO del export cumple la meta.
+
+La base guarda solo el mes operativo activo: un planning normalizado, un universo, el último export y hasta cinco selecciones semanales. Al guardar un nuevo mes se reemplazan los datos anteriores y se borran sus selecciones dentro de la misma transacción. Descargar los históricos necesarios antes de cambiar de mes. No se acumulan Excel originales, export anteriores ni ZIP binarios; los ZIP se regeneran con las mismas filas guardadas. El límite de datos mensuales es 25 MB y el de cada selección, 10 MB. El dashboard se actualiza al volver a la pestaña y cada minuto mientras está visible.
+
+RLS está habilitado en todas las tablas de la aplicación. Las consultas requieren una cuenta con membresía; las escrituras requieren rol administrador. Los usuarios no pueden modificar su membresía ni elevar su rol. La gestión de usuarios verifica el JWT y la membresía actual en una Edge Function; su clave de servicio permanece únicamente en Supabase. Retirar la membresía bloquea también las consultas con tokens anteriores. La revisión optimista evita que dos cargas simultáneas sobrescriban cambios sin avisar. CSP restringe los scripts y las conexiones del portal, y se impide incrustarlo en otros sitios.
 
 ## Uso
 
@@ -20,7 +34,7 @@ Si un planning copiado conserva fechas antiguas, corregir las filas 2 y 3 de RET
 
 Ejemplo: para octubre de 2026, semana operativa 1, del **28/09/2026 al 03/10/2026**, seleccionar **octubre / semana 1**. El export sigue siendo opcional. Si RETAIL todavía dice 21/09–26/09, hay que corregir las fechas del Excel o indicarlas en la página antes de generar; cambiar solamente el nombre del archivo no cambia sus fechas.
 
-Los archivos se procesan en un Web Worker en el navegador, sin subir datos a un servidor. El universo y las correcciones se guardan en almacenamiento local; el planning y el export permanecen en memoria. El repositorio y GitHub Pages contienen solamente código, nunca archivos operativos. No se ejecutan macros ni se modifican los Excel originales. Las fórmulas del planning se leen a partir de los valores guardados por Excel: recalcular y guardar el archivo antes de cargarlo si hubo cambios.
+Los archivos se leen en un Web Worker en el navegador. En Vercel, las cargas de seguimiento y el botón de guardar selección envían a Supabase sus datos normalizados para compartirlos; generar una selección local no la guarda automáticamente. El universo y las correcciones también pueden recordarse en el navegador. El repositorio y GitHub Pages contienen solamente código, nunca archivos operativos. No se ejecutan macros ni se modifican los Excel originales. Las fórmulas del planning se leen a partir de los valores guardados por Excel: recalcular y guardar el archivo antes de cargarlo si hubo cambios.
 
 ## Reglas implementadas
 
@@ -37,7 +51,7 @@ La página lee los bytes al seleccionar cada archivo y reutiliza esa copia en me
 | Facing ABI | Visitas de FACING CERVEZAS 2. Una al mes para todos los puntos: requiere OSA y cero visitas, sin SOVI. En la última semana declarada se permite coincidir con SOVI. Si queda un pendiente sin OSA, se informa sin romper esa dependencia. |
 | Cruz Verde | Cada estudio por separado. Frecuencia 2: una medición por quincena con el mismo reparto por mitades que OSA quincenal. Frecuencias 3 y 4: se asigna si faltan visitas para la cuota mensual. CRUZ VERDE PROFUNDIDAD corresponde a CV TEST en el export. |
 | Colgate | PRECIOS COLGATE, EXHIBICIONES COLGATE y COLGATE PROMOCIONES FARMACIAS: solo cero TERMINADO en su propio estudio del mes. |
-| CENCOSUD | Una visita mensual. Seleccionar solo puntos sin TERMINADO de CENCOSUD en el mes. Nombre del export configurable. |
+| CENCOSUD | Una visita mensual de precios y una de fotografías. El folio deja de seleccionarse cuando ambos estudios tienen TERMINADO; también se acepta el estudio genérico CENCOSUD legado. Nombre genérico configurable. El CSV conserva su código original. |
 | POY y FERIAS LIBRES | Carga completa. |
 
 El conteo se filtra por `DIA` de la visita desde el **lunes de la primera semana del mes operativo** hasta antes de la fecha de inicio de carga. Ese lunes se calcula como lunes de la carga menos `(semana elegida − 1) × 7 días`; incluye los días del mes calendario anterior que pertenecen a la semana 1. Para octubre de 2026, semana 2, con carga 05/10–10/10, se cuentan las visitas desde **28/09** y anteriores al **05/10**. Las visitas del 28–30 de septiembre participan en las cuotas mensuales y quincenales de octubre. Los ocho componentes SOVI del 28/09–04/10 se pueden completar a ambos lados del cambio de mes.
@@ -83,6 +97,10 @@ npm run build
 ```
 
 `src/engine.js` contiene reglas puras; `src/workbooks.js` lee los archivos; `src/worker.js` procesa y empaqueta; `src/main.js` controla la interfaz. Las pruebas usan ejemplos sintéticos y verifican cuotas, semanas, dependencias, errores de origen y formato CSV.
+
+`src/tracking.js` calcula metas y productividad; `src/dashboard.js` muestra filtros y descargas; `src/portal.js` integra acceso y cargas; `src/cloud.js` usa exclusivamente la clave publicable. Copiar `.env.example` a `.env.local` y configurar `VITE_SUPABASE_URL` y `VITE_SUPABASE_PUBLISHABLE_KEY` para habilitar el portal. Nunca usar una clave de servicio con prefijo `VITE_`.
+
+El esquema de Supabase está en `supabase/schema.sql`; `supabase/verify-access.sql` valida permisos, concurrencia y reemplazo de mes dentro de una transacción que se revierte. La Edge Function está en `supabase/functions/chile-access/index.ts` y valida JWT explícitamente dentro del handler para permitir la activación inicial sin sesión. Aplicar el esquema y desplegar la función antes de conectar un proyecto nuevo. En Authentication, desactivar el registro público y los accesos anónimos, establecer mínimo 12 caracteres y activar Secure password change. Las credenciales de servidor son las variables internas de Supabase; no se configuran en Vercel. `vercel.json` define el build y los encabezados de seguridad. Al cambiar de proyecto, actualizar también el dominio de Supabase permitido en CSP.
 
 GitHub Actions valida las pruebas, construye con Vite y publica `dist` en GitHub Pages en cada cambio a `main`. Rutas relativas permiten alojar bajo `/Chile-selecicon/`. Configurar Pages con origen **GitHub Actions**.
 

@@ -1,7 +1,8 @@
-import { parsePlanning,parseUniverse,parseReport } from './workbooks.js';
+import { parsePlanning,parseUniverse,parseReport,parseTrackingPlanning } from './workbooks.js';
 import { select,csvRows } from './engine.js';
 import { zipSync,strToU8 } from 'fflate';
 import { markPlanning } from './planning-export.js';
+import { buildTracking } from './tracking.js';
 self.onmessage=async event=>{
   const {task,data}=event.data;
   try{
@@ -10,6 +11,13 @@ self.onmessage=async event=>{
       self.postMessage({ok:true,bytes:marked.bytes,column:marked.column},[marked.bytes.buffer]);return;
     }
     if(task==='universe'){self.postMessage({ok:true,data:parseUniverse(data)});return;}
+    if(task==='report'){self.postMessage({ok:true,data:parseReport(data)});return;}
+    if(task==='tracking'){self.postMessage({ok:true,data:buildTracking(data)});return;}
+    if(task==='workspaceInputs'){
+      const planning=parseTrackingPlanning(data.planning),universe=data.universeBytes?parseUniverse(data.universeBytes):data.universe;
+      const report=data.report?parseReport(data.report):[];
+      self.postMessage({ok:true,data:{planning,universe,report}});return;
+    }
     if(task==='planning'){const p=parsePlanning(data);self.postMessage({ok:true,data:{start:p.studies[0].start,end:p.studies[0].end,studies:p.studies.length,rows:p.rows.length}});return;}
     if(task==='select'){
       const progress=message=>self.postMessage({progress:message});
@@ -20,7 +28,7 @@ self.onmessage=async event=>{
       progress('Preparando los CSV y el ZIP…');
       const files=Object.fromEntries(result.files.map(f=>[f.name,strToU8(csvRows(f.rows))]));
       const zip=zipSync(files,{level:6});
-      self.postMessage({ok:true,data:result,zip,points:planning.points},[zip.buffer]);
+      self.postMessage({ok:true,data:result,zip,points:planning.points,context:{planning,universe:data.universe,report,options:data.options}},[zip.buffer]);
     }
   }catch(e){self.postMessage({ok:false,error:e.message,details:e.details||[]});}
 };

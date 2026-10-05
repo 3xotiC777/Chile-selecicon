@@ -1,10 +1,11 @@
+.local/
+.git/
 node_modules/
 dist/
-.local/
+.env*
 *.xlsx
 *.xlsm
 *.csv
 *.zip
-.env*
-!.env.example
-.vercel/
+supabase/
+tests/

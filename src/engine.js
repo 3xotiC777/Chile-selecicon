@@ -9,6 +9,8 @@ export const SOVI = ['SOVI EMBONOR EXHIBICIONES COMPETENCIA','SOVI EMBONOR SSD',
 export const FACING = 'FACING ABI EMBONOR';
 export const CV = ['QUIEBRES CRUZ VERDE','CRUZ VERDE PROFUNDIDAD'];
 export const MONTHLY = ['PRECIOS COLGATE','EXHIBICIONES COLGATE','COLGATE PROMOCIONES FARMACIAS','CENCOSUD'];
+const CENCOSUD_PARTS=['PRECIOS CENCOSUD','FOTOGRAFIAS CENCOSUD'];
+const CENCOSUD_INTERNAL_ALIASES=Object.fromEntries(CENCOSUD_PARTS.map(name=>[name,name]));
 export const DEFAULT_ALIASES = {
   [OSA]: 'OSA BEBESTIBLES 2',
   [FACING]: 'FACING CERVEZAS 2',
@@ -172,7 +174,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   const start=starts[0],end=ends[0];
   if(!isoDate(start)||!isoDate(end)||end<start)fail('Revisa las fechas de inicio y fin en RETAIL.');
   if(start.slice(0,7)!==month&&end.slice(0,7)!==month)fail(`El mes elegido (${month}) no coincide con las fechas de carga (${start} a ${end}). Corrige las filas 2 y 3 de RETAIL o activa «Usar otras fechas de carga» e indica la semana correcta.`);
-  const aliases={...DEFAULT_ALIASES,...options.aliases};
+  const aliases={...DEFAULT_ALIASES,...CENCOSUD_INTERNAL_ALIASES,...options.aliases};
   const history=buildHistory(report,{month,start,aliases,week});
   const half=week<=2?1:2;
   const warnings=[...(planning.warnings||[])];
@@ -205,7 +207,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(frequencyProblems.length)fail('Corrige las frecuencias antes de generar el ZIP.',[...new Set(frequencyProblems)]);
   const relevant=Object.keys(aliases).filter(s=>studies.has(s));
   if(hasReport){
-    const absent=relevant.filter(s=>!history.seenNames.has(normalize(aliases[s])));
+    const absent=relevant.filter(s=>!history.seenNames.has(normalize(aliases[s]))&&!(s==='CENCOSUD'&&CENCOSUD_PARTS.some(part=>history.seenNames.has(normalize(aliases[part])))));
     if(absent.length)warnings.push(`Sin registros en el export para: ${absent.map(s=>`${s} (${aliases[s]})`).join(', ')}. Se cuentan 0 visitas; comprueba que el export esté completo.`);
     if(history.stats.valid===0)warnings.push(`El export no aporta visitas válidas para el mes y fechas de esta selección. Para ${month}, solo se cuentan estudios configurados con estado TERMINADO y DIA desde el inicio del mes operativo (${csvDate(history.operationalStart)}) y anterior al inicio de carga (${csvDate(start)}). Si el planning conserva fechas de otra semana, activa «Usar otras fechas de carga» o corrige las filas 2 y 3 de RETAIL. Comprueba el período antes de cargar el ZIP.`);
   }
@@ -230,7 +232,14 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     }
   }
   for(const s of MONTHLY)for(const r of rows(s)){
-    const v=history.count(s,r.folio);decide(r,v===0,v,v===0?'Visita mensual pendiente':'Visita mensual completada');
+    if(s==='CENCOSUD'){
+      const legacy=history.count(s,r.folio),prices=history.count(CENCOSUD_PARTS[0],r.folio),photographs=history.count(CENCOSUD_PARTS[1],r.folio);
+      const complete=legacy>0||prices>0&&photographs>0,v=complete?1:0;
+      decide(r,!complete,v,complete?'Visita mensual CENCOSUD completada':`CENCOSUD pendiente: precios ${prices>0?'completado':'pendiente'}, fotografías ${photographs>0?'completado':'pendiente'}`);
+      Object.assign(decisions.at(-1),{cencosudLegacyVisits:legacy,cencosudPricesVisits:prices,cencosudPhotographsVisits:photographs});
+    }else{
+      const v=history.count(s,r.folio);decide(r,v===0,v,v===0?'Visita mensual pendiente':'Visita mensual completada');
+    }
   }
   for(const s of ['POY','FERIAS LIBRES'])for(const r of rows(s))decide(r,true,null,'Carga completa');
   const osaRows=rows(OSA),fixed=osaRows.filter(r=>freq(r)==='fixed');

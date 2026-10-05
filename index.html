@@ -9,8 +9,14 @@
     <title>Chile · Selección de campo</title>
   </head>
   <body>
-    <header class="topbar"><a class="brand" href="./"><span class="brandmark">ch<span>.</span></span><span>PLANEACIÓN DE CAMPO<small>Chile / Selección semanal</small></span></a><span class="local-label"><i></i> Archivos procesados en tu equipo</span></header>
+    <header class="topbar"><a class="brand" href="./"><span class="brandmark">ch<span>.</span></span><span>PLANEACIÓN DE CAMPO<small>Chile / Planeación y seguimiento</small></span></a><div id="account-controls" class="account-controls" hidden><span id="account-name"></span><button id="change-password" type="button">Cambiar contraseña</button><button id="sign-out" type="button">Salir</button></div></header>
     <main>
+      <section id="auth-view" class="panel login-panel" aria-label="Acceso a Chile"></section>
+      <div id="app-view" hidden>
+      <nav class="app-nav" aria-label="Secciones"><button type="button" data-view="dashboard" class="active">Avance de campo</button><button type="button" data-view="planning" data-admin hidden>Planeación</button><button type="button" data-view="export" data-admin hidden>Actualizar seguimiento</button><button type="button" data-view="users" data-admin hidden>Usuarios</button></nav>
+      <section id="password-panel" class="panel portal-password" hidden><h2>Cambiar tu contraseña</h2><form id="password-form" class="portal-form"><label>Nueva contraseña<input id="new-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required /></label><label>Confirmar contraseña<input id="confirm-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required /></label><button class="primary" type="submit">Guardar contraseña</button><p id="password-status" role="status" class="portal-message"></p></form></section>
+      <section id="dashboard-view"><div id="dashboard"></div><section id="saved-plans" class="panel shared-panel"></section></section>
+      <section id="planning-view" hidden>
       <div class="page-title"><div><p class="eyebrow">OPERACIÓN CHILE</p><h1>Prepara la próxima visita.</h1><p>De la planeación semanal a los CSV listos para cargar.</p></div><div class="stamp">SELECCIÓN<span>SEMANAL</span></div></div>
       <form id="selection-form">
         <section class="panel period-panel" aria-labelledby="period-heading"><div class="section-heading"><span class="step">01</span><h2 id="period-heading">Define la semana</h2></div>
@@ -44,7 +50,15 @@
       </form>
       <div id="status" role="status" aria-live="polite"></div>
       <section id="results" class="panel results" hidden></section>
-    </main><footer>Chile · Planeación de campo<span>Los Excel y las visitas permanecen en tu navegador.</span></footer>
+    </section>
+      <section id="export-view" hidden>
+        <div class="portal-title"><p class="eyebrow">SEGUIMIENTO COMPARTIDO</p><h1>Actualiza el avance.</h1><p>Sube el export completo del mes operativo. Campo verá la actualización al volver a consultar.</p></div>
+        <section class="panel"><h2>Actualizar solo el export</h2><p id="export-current" class="note">Primero carga la base del mes.</p><form id="export-form" class="portal-form"><label class="wide">Export de visitas<input id="tracking-export" type="file" accept=".xlsx,.xlsm,.csv" required /></label><button id="update-export" class="primary" type="submit">Actualizar avance</button><p id="export-status" role="status" class="portal-message"></p></form></section>
+        <section class="panel shared-panel"><h2>Base de seguimiento del mes</h2><p class="note">Carga el RETAIL para definir qué puntos aplican a cada estudio. Al iniciar un mes nuevo se reemplazan el mes anterior y sus ZIP. Conserva tus descargas si necesitas el histórico.</p><form id="import-form" class="portal-form"><label>Planning con hoja RETAIL<input id="tracking-base" type="file" accept=".xlsm,.xlsx" required /></label><label>Universo de frecuencias<input id="tracking-universe" type="file" accept=".xlsx,.xlsm" /><span class="note">Opcional si ya hay un universo compartido.</span></label><label>Export de visitas<input id="tracking-base-report" type="file" accept=".xlsx,.xlsm,.csv" /><span class="note">Opcional para iniciar el mes.</span></label><label>Mes operativo<input id="import-month" type="month" required /></label><label>Semana de esta base<select id="import-week"><option value="1">Semana 1</option><option value="2">Semana 2</option><option value="3">Semana 3</option><option value="4">Semana 4</option><option value="5">Semana 5</option></select></label><label>Semanas de campo del mes<select id="import-weeks"><option value="4">4 semanas</option><option value="5" selected>5 semanas</option></select></label><button id="import-save" class="primary" type="submit">Guardar base</button><p id="import-status" role="status" class="portal-message"></p></form></section>
+      </section>
+      <section id="users-view" hidden><div class="portal-title"><p class="eyebrow">ADMINISTRACIÓN</p><h1>Acceso del equipo.</h1><p>Campo puede consultar el dashboard y descargar. Los administradores también pueden cargar archivos y gestionar cuentas.</p></div><section class="panel"><h2>Crear usuario</h2><form id="user-form" class="portal-form"><label>Nombre<input id="user-name" autocomplete="off" maxlength="120" required /></label><label>Correo<input id="user-email" type="email" autocomplete="off" required /></label><label>Contraseña inicial<input id="user-password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required /><span class="note">Mínimo 12 caracteres. El usuario puede cambiarla al entrar.</span></label><label>Permisos<select id="user-role"><option value="field">Campo · consultar y descargar</option><option value="admin">Administrador</option></select></label><button id="create-user" class="primary" type="submit">Crear usuario</button><p id="users-status" role="status" class="portal-message"></p></form></section><section class="panel shared-panel"><h2>Usuarios de Chile</h2><div id="users-list"></div></section></section>
+      </div>
+    </main><footer>Chile · Planeación de campo<span>Acceso por usuario · Seguimiento del mes activo</span></footer>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
