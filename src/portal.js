@@ -14,7 +14,7 @@ export function selectionZip(selection){return zipSync(Object.fromEntries(select
 export function compactSelection(result){return {files:result.files,period:result.period,metrics:result.metrics,warnings:result.warnings,workload:result.workload,soviAuditors:result.soviAuditors};}
 
 export function initPortal({runWorker,onWorkspace,resetSelection}){
-  const cloud=createCloud();let access=null,workspace=null,loading=null,section='dashboard',authRevision=0,accessSync=null,loadingRevision=0;
+  const cloud=createCloud();let access=null,workspace=null,loading=null,section='dashboard',authRevision=0,accessSync=null,loadingRevision=0,syncing=false;
   $('import-month').value=new Date().toISOString().slice(0,7);
   const importCalendarContainer=document.createElement('div');$('import-save').before(importCalendarContainer);
   const importCalendar=mountMonthRange(importCalendarContainer,{month:$('import-month').value,onSave:saveMonthRange});
@@ -36,7 +36,18 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
     document.querySelectorAll('[data-admin]').forEach(el=>el.hidden=!admin());
     if(signed){$('account-name').textContent=(access.member?.display_name||access.user.email)+' · '+(admin()?'Administrador':'Campo');if(!admin()&&section!=='dashboard')view('dashboard');}
   }
-  function clearPrivateView(){workspace=null;dashboard.setSnapshot(null);$('saved-plans').replaceChildren();$('users-list').replaceChildren();$('password-panel').hidden=true;for(const id of ['login-form','password-form','user-form','export-form','import-form'])$(id)?.reset();$('import-month').value=new Date().toISOString().slice(0,7);importCalendar.setMonth($('import-month').value,true);resetSelection?.();}
+  function clearPrivateView(){workspace=null;dashboard.setSnapshot(null);$('shared-sync-status').textContent='';$('shared-sync-status').hidden=true;$('sql-sync-current').textContent='Primero guarda la base del mes y confirma sus fechas.';$('sql-sync-message').textContent='';$('saved-plans').replaceChildren();$('users-list').replaceChildren();$('password-panel').hidden=true;for(const id of ['login-form','password-form','user-form','export-form','import-form'])$(id)?.reset();$('import-month').value=new Date().toISOString().slice(0,7);importCalendar.setMonth($('import-month').value,true);resetSelection?.();}
+  function renderSyncStatus(status){
+    const banner=$('shared-sync-status');
+    const currentMonth=workspace?.month;
+    if(!status||!currentMonth||status.month!==currentMonth){banner.hidden=true;$('sql-sync-current').textContent='Sincroniza las visitas del mes activo. La actualización diaria usará las mismas fechas.';return;}
+    const date=value=>new Date(value).toLocaleString('es-CL',{timeZone:'America/Santiago'});
+    const previous=status.last_success_at?`Última sincronización: ${date(status.last_success_at)} · ${n(status.row_count)} registros.`:'Aún no se ha completado una sincronización para este mes.';
+    const staleRun=status.status==='running'&&Date.now()-Date.parse(status.started_at)>300000;
+    const state=status.status==='failed'||staleRun?' No se pudo completar la última actualización; se conserva el avance anterior.':status.status==='running'?' Sincronización en curso…':'';
+    banner.textContent=`SQL Server · ${previous}${state}`;banner.hidden=false;
+    $('sql-sync-current').textContent=`${previous}${state} Rango: ${status.range_start} al ${status.range_end}.`;
+  }
   async function syncAccess(){
     if(accessSync)return accessSync;
     const revision=++authRevision;
@@ -55,8 +66,11 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
       try{const current=await cloud.getAccess();if(revision!==authRevision)return;
         if(!current.role){access=null;clearPrivateView();showAccess();message('auth-status','Tu acceso fue retirado. Solicítalo al administrador.',true);await cloud.signOut();return;}
         access=current;showAccess();
+        const syncStatus=await cloud.getSqlSyncStatus();if(revision!==authRevision)return;
+        renderSyncStatus(syncStatus);
         if(!force&&workspace&&await cloud.getWorkspaceRevision()===workspace.revision)return;
         const next=await cloud.loadWorkspace();if(revision!==authRevision)return;workspace=next;onWorkspace?.(next);
+        renderSyncStatus(syncStatus);
         if(!workspace.planning){dashboard.setSnapshot(null);renderPlans();return;}
         const options={...workspace.metadata.options,month:workspace.month};
         const latest=workspace.weeklyPlans[0];
@@ -84,7 +98,8 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
     const expanded=(oldRange.start&&monthRange.start<oldRange.start)||(oldRange.end&&monthRange.end>oldRange.end);
     await cloud.saveWorkspace({month,report:reportForPeriod(base.report,preview.data.period),revision:base.revision,metadata:{options:{...options,operationalStart:preview.data.period.operationalStart,operationalEnd:preview.data.period.operationalEnd,secondHalfStart:preview.data.period.secondHalfStart}}});
     await refresh({force:true});
-    return {message:expanded?'Rango compartido guardado. Vuelve a subir el export completo para incluir las visitas de las fechas agregadas.':'Rango compartido guardado. La selección y el dashboard usarán estas fechas.'};
+    if(expanded){await synchronize();return {message:'Rango compartido guardado. Revisa el estado de sincronización para confirmar las visitas de las fechas agregadas.'};}
+    return {message:'Rango compartido guardado. La selección y el dashboard usarán estas fechas.'};
   }
   function renderPlans(){
     const plans=workspace?.weeklyPlans||[];
@@ -149,9 +164,26 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
       const preview=await runWorker('tracking',{planning:base.planning,universe:base.universe,report:loaded.data,options:base.metadata.options});
       assertCurrent();
       if(!preview.data.daily.length)throw new Error('El export no tiene encuestas fechadas dentro del mes operativo activo. Revisa el archivo y el período.');
-      await cloud.saveWorkspace({month:base.month,report:reportForPeriod(loaded.data,preview.data.period),revision:base.revision,metadata:{reportName:file.name,reportUpdatedAt:new Date().toISOString()}});
+      await cloud.saveWorkspace({month:base.month,report:reportForPeriod(loaded.data,preview.data.period),revision:base.revision,metadata:{reportName:file.name,reportSource:'manual',reportUpdatedAt:new Date().toISOString()}});
       $('export-form').reset();message('export-status','Export actualizado. Se conservaron las planeaciones y sus ZIP.');await refresh({force:true});
     }catch(e){message('export-status',e.message,true);}finally{$('update-export').disabled=false;}
+  });
+  async function synchronize(){
+    if(syncing||!admin()||!workspace?.planning)return;
+    const sessionRevision=authRevision;
+    syncing=true;$('sync-sql-report').disabled=true;$('update-export').disabled=true;
+    message('sql-sync-message','Leyendo visitas de SQL Server…');
+    try{
+      const result=await cloud.syncSqlReport();
+      if(sessionRevision!==authRevision||!admin())return;
+      message('sql-sync-message',result.skipped?result.message:`${result.message} ${n(result.rows)} registros actualizados.`);
+      await refresh({force:true});
+    }catch(error){if(sessionRevision===authRevision&&admin()){message('sql-sync-message',error.message,true);await refresh({force:true});}}
+    finally{syncing=false;$('sync-sql-report').disabled=false;$('update-export').disabled=false;}
+  }
+  $('sync-sql-report').addEventListener('click',()=>{
+    if(!workspace?.planning)return message('sql-sync-message','Primero guarda la base mensual y confirma sus fechas.',true);
+    synchronize();
   });
   $('import-form').addEventListener('submit',async event=>{
     event.preventDefault();if(!admin())return;$('import-save').disabled=true;message('import-status','Leyendo archivos…');
@@ -175,6 +207,7 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
       assertCurrent();
       await cloud.saveWorkspace({month,planning,universe,report:reportFile?reportForPeriod(report,checked.data.period):base?.month===month?reportForPeriod(base.report,checked.data.period):[],revision:base?.revision||0,metadata:{planningName:planningFile.name,universeName:universeFile?.name||base?.metadata.universeName||'Universo compartido',...(reportFile?{reportName:reportFile.name}:{}),options}});
       message('import-status','Base guardada. Genera la selección semanal en Planeación para guardar su ZIP.');await refresh({force:true});
+      if(!reportFile)await synchronize();
     }catch(e){message('import-status',e.message,true);}finally{$('import-save').disabled=false;}
   });
   if(!cloud){

@@ -96,6 +96,17 @@ export function createCloud({ url = defaultUrl, key = defaultKey, client } = {})
       if (!row) throw new CloudError('Tu acceso al seguimiento fue retirado.', 'ACCESS_DENIED');
       return row.revision;
     },
+    async getSqlSyncStatus() {
+      return checked(await supabase.from('chile_sql_sync').select('month,range_start,range_end,status,started_at,finished_at,last_success_at,row_count,error_code').eq('id', true).maybeSingle());
+    },
+    async syncSqlReport() {
+      const {session}=checked(await supabase.auth.getSession());
+      if(!session)throw new CloudError('Inicia sesión para sincronizar.');
+      const response=await fetch('/api/sync-report',{method:'POST',headers:{Authorization:`Bearer ${session.access_token}`},cache:'no-store'});
+      const data=await response.json().catch(()=>null);
+      if(!response.ok||!data)throw new CloudError(data?.error||'No se pudo sincronizar SQL Server. Se conserva el avance anterior.',data?.code||'');
+      return data;
+    },
     async loadWorkspace() {
       // The two REST reads may straddle a monthly replacement or weekly save.
       // Check the revision so the dashboard never combines two different commits.

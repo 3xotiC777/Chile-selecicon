@@ -6,6 +6,7 @@ import { workloadCsv } from './workload.js';
 import { captureFile } from './files.js';
 import { initPortal } from './portal.js';
 import { mountMonthRange } from './month-range.js';
+import { sharedReportFor } from './report-source.js';
 const $=id=>document.getElementById(id);
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number=value=>Number(value).toLocaleString('es-CL');
@@ -13,7 +14,7 @@ const CACHE='chile-universe-v1';
 let universe=null,result=null,zip=null,revision=0,periodRevision=0,busy=false,universeTask=null,planningTask=null,planningDates=null;
 const snapshots={},fileLabels={planning:'la planeación',report:'el export',universe:'el universo'};
 let planningOutputSource=null,markedPlanning=null;
-let generatedDraft=null,portal=null;
+let generatedDraft=null,portal=null,sharedWorkspace=null;
 $('month').value=new Date().toISOString().slice(0,7);
 const selectionCalendar=mountMonthRange($('selection-month-range'),{month:$('month').value,onChange:()=>{periodRevision++;invalidate();updatePeriod();},onSave:(month,range)=>portal?.saveMonthRange(month,range)});
 $('aliases').innerHTML=Object.entries(DEFAULT_ALIASES).filter(([name])=>name!=='CRUZ VERDE PROFUNDIDAD').map(([name,alias])=>`<label>${escape(name)}<input data-alias="${escape(name)}" value="${escape(alias)}" /></label>`).join('');
@@ -29,6 +30,7 @@ function runWorker(task,data,progress){
 }
 function invalidate(){revision++;result=null;zip=null;generatedDraft=null;planningOutputSource=null;markedPlanning=null;$('results').hidden=true;if(!busy)$('status').replaceChildren();}
 function resetSelectionSession(){
+  sharedWorkspace=null;
   invalidate();$('results').replaceChildren();$('selection-form').reset();
   for(const name of Object.keys(snapshots))delete snapshots[name];
   universe=null;universeTask=null;planningTask=null;planningDates=null;periodRevision=0;
@@ -42,8 +44,10 @@ function showStatus(message,error=false,details=[]){$('status').innerHTML=`<div 
 function updatePeriod(){
   selectionCalendar.setMonth($('month').value);
   const week=Number($('week').value),weeks=Number($('weeks').value),holidays=Number($('holidays').value);
-  $('report').required=week>1;
-  $('report-required').textContent=week===1?'Opcional en semana 1':'Obligatorio desde semana 2';
+  const shared=sharedReportFor(sharedWorkspace,$('month').value,selectionCalendar.getRange());
+  $('report').required=week>1&&!shared;
+  $('report-required').textContent=shared?'Se usará el avance compartido':week===1?'Opcional en semana 1':'Obligatorio desde semana 2';
+  if(!$('report').files.length){$('report-name').textContent=shared?shared.name:'Reporte apoyo auditor';$('report').closest('.file-box').classList.toggle('loaded',!!shared);}
   const schedule=week===1||week===3?'mitad por auditor.':week===5?'solo pendientes; sin tercera medición.':'segunda mitad y visitas pendientes de esta quincena.';
   $('period-note').textContent=`${week<3?'Primera':'Segunda'} quincena · ${schedule} Aplica a SOVI, OSA quincenal, Cruz Verde de frecuencia 2, Precios Colgate y Colgate Promociones Farmacias. ${week===weeks?'Última semana: Facing puede coincidir con SOVI para cerrar pendientes.':''} ${holidays?'Fijas OSA: '+(100-17*holidays)+' % de la base.':'Fijas OSA: todas las de la planeación.'}`;
   document.querySelectorAll('.week-track span').forEach((s,i)=>s.classList.toggle('active',i+1===week));$('track5').hidden=weeks===4;
@@ -63,7 +67,7 @@ function updateDates(){
   const monthRange=selectionCalendar.getRange();
   if(start)note.textContent+=` Conteo del export: desde ${(monthRange?.start||operationalMonthStart(start,Number($('week').value))).split('-').reverse().join('/')} hasta antes del ${start.split('-').reverse().join('/')}${monthRange?`, dentro del rango mensual guardado hasta ${monthRange.end.split('-').reverse().join('/')}`:', incluyendo los días del mes anterior que pertenecen a la primera semana operativa'}.`;
 }
-function updateReady(){const missing=[];if(!selectionCalendar.getRange())missing.push('confirmar el rango del mes');if(!planningDates)missing.push('planeación');if(!universe)missing.push('universo');if((Number($('week').value)>1||$('report').files.length)&&!snapshots.report?.bytes)missing.push('export');$('ready-note').textContent=missing.length?'Pendiente: '+missing.join(', ')+'.':'Archivos listos. Genera la selección y revisa el resumen.';}
+function updateReady(){const missing=[],shared=sharedReportFor(sharedWorkspace,$('month').value,selectionCalendar.getRange());if(!selectionCalendar.getRange())missing.push('confirmar el rango del mes');if(!planningDates)missing.push('planeación');if(!universe)missing.push('universo');if(($('report').files.length||Number($('week').value)>1&&!shared)&&!snapshots.report?.bytes)missing.push('export');$('ready-note').textContent=missing.length?'Pendiente: '+missing.join(', ')+'.':'Archivos listos. Genera la selección y revisa el resumen.';}
 function updateUniverse(name){$('universe-name').textContent=`${name} · ${number(universe.length)} frecuencias`;$('universe').closest('.file-box').classList.add('loaded');$('forget').hidden=false;updateReady();}
 try{const cached=JSON.parse(localStorage.getItem(CACHE));if(cached?.version===1&&Array.isArray(cached.rows)&&cached.rows.length){universe=cached.rows;updateUniverse(cached.name);}}catch{/* Browser storage may be unavailable. */}
 $('forget').addEventListener('click',()=>{invalidate();universe=null;$('universe').value='';universeTask=null;delete snapshots.universe;try{localStorage.removeItem(CACHE);}catch{}$('universe-name').textContent='Selecciona UNIVERSO CHILE.xlsx';$('universe').closest('.file-box').classList.remove('loaded');$('forget').hidden=true;updateReady();});
@@ -166,16 +170,20 @@ $('selection-form').addEventListener('submit',async event=>{
     if(correctionEntries.some(s=>!/^\d+\s*=\s*\d+$/.test(s)))throw new Error('Usa FOLIO=CODIGO en las correcciones de auditor, separados por comas.');
     options.auditorOverrides=Object.fromEntries(correctionEntries.map(s=>s.split('=').map(v=>v.trim())));
     showStatus('Leyendo archivos en tu navegador…');
-    const loaded=await runWorker('select',{planning:planningSnapshot.bytes,report:reportFile?reportSnapshot.bytes:null,universe,options},message=>showStatus(message));
+    const shared=!reportFile?sharedReportFor(sharedWorkspace,options.month,options.monthRange):null;
+    const loaded=await runWorker('select',{planning:planningSnapshot.bytes,report:reportFile?reportSnapshot.bytes:null,reportRows:shared?.rows,universe,options},message=>showStatus(message));
     if(submittedRevision!==revision){showStatus('Cambiaste los archivos o ajustes durante el cálculo. Genera de nuevo la selección.');return;}
-    result=loaded.data;zip=loaded.zip;generatedDraft={...loaded.context,result,metadata:{planningName:planningFile.name,reportName:reportFile?.name||'',universeName:snapshots.universe?.file.name||'Universo guardado'}};planningOutputSource={bytes:planningSnapshot.bytes,points:loaded.points,name:planningFile.name};renderResults();$('status').replaceChildren();$('results').scrollIntoView({behavior:'smooth',block:'start'});
+    result=loaded.data;zip=loaded.zip;generatedDraft={...loaded.context,result,metadata:{planningName:planningFile.name,reportName:reportFile?.name||shared?.name||'',reportSource:reportFile?'manual':shared?.source||'',universeName:snapshots.universe?.file.name||'Universo guardado'}};planningOutputSource={bytes:planningSnapshot.bytes,points:loaded.points,name:planningFile.name};renderResults();$('status').replaceChildren();$('results').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){showStatus(e.message,true,e.details);}
   finally{busy=false;$('generate').disabled=false;$('generate').innerHTML='Generar selección <span>→</span>';$('selection-form').removeAttribute('aria-busy');}
 });
 portal=initPortal({runWorker,onWorkspace:workspace=>{
+  if(sharedWorkspace?.revision!==workspace.revision&&!$('report').files.length)invalidate();
+  sharedWorkspace=workspace;
   if(!busy&&!snapshots.universe&&workspace.universe?.length){universe=workspace.universe;updateUniverse(workspace.metadata.universeName||'Universo compartido');}
   if(workspace.metadata.options?.monthRange){
     if(periodRevision===0&&!snapshots.planning){$('month').value=workspace.month;updatePeriod();}
     selectionCalendar.adoptShared(workspace.month,workspace.metadata.options.monthRange);
   }
+  updatePeriod();
 },resetSelection:resetSelectionSession});
