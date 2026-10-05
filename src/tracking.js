@@ -1,6 +1,6 @@
 // Monthly progress and productivity share normalized inputs with the selector.
 // A SOVI measurement is eight distinct completed studies within one field week.
-import {normalize,id,isoDate,monday,frequency,SelectionError,OSA,REPLICAS,SOVI,FACING,CV,MONTHLY,DEFAULT_ALIASES} from './engine.js';
+import {normalize,id,isoDate,monday,frequency,SelectionError,OSA,REPLICAS,SOVI,FACING,CV,FORTNIGHTLY,MONTHLY,DEFAULT_ALIASES} from './engine.js';
 import {resolveOperationalPeriod,suggestPeriod,validateMonthRange} from './period.js';
 
 export const TRACKING_ALIASES={...DEFAULT_ALIASES,
@@ -90,6 +90,7 @@ function periodFor(planning,options){
 }
 function targets(study,f,weeks){
   if(study==='SOVI EMBONOR')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Una medición completa de 8 estudios por quincena'};
+  if(FORTNIGHTLY.includes(study))return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Una visita por quincena'};
   if([OSA,...REPLICAS].includes(study)){
     if(f==='fixed')return {target:weeks,rule:'weekly',frequency:'fija',targetLabel:`Una visita por semana (${weeks} semanas)`};
     if(f==='fortnightly')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Una visita por quincena'};

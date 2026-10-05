@@ -56,7 +56,8 @@ La página lee los bytes al seleccionar cada archivo y reutiliza esa copia en me
 | SOVI fija | Una medición por quincena, máximo dos al mes. Semanas 1 y 3: mitad de elegibles OSA por auditor, redondeada hacia arriba; prioridad por menos visitas completas. Semanas 2 y 4: todos los pendientes, incluso si superan la mitad por visitas fallidas. Semana 5: solo pendientes de la segunda quincena. Los ocho estudios replican los mismos folios. |
 | Facing ABI | Visitas de FACING CERVEZAS 2. Una al mes para todos los puntos: requiere OSA y cero visitas, sin SOVI. En la última semana declarada se permite coincidir con SOVI. Si queda un pendiente sin OSA, se informa sin romper esa dependencia. |
 | Cruz Verde | Cada estudio por separado. Frecuencia 2: una medición por quincena con el mismo reparto por mitades que OSA quincenal. Frecuencias 3 y 4: se asigna si faltan visitas para la cuota mensual. CRUZ VERDE PROFUNDIDAD corresponde a CV TEST en el export. |
-| Colgate | PRECIOS COLGATE, EXHIBICIONES COLGATE y COLGATE PROMOCIONES FARMACIAS: solo cero TERMINADO en su propio estudio del mes. |
+| PRECIOS COLGATE y COLGATE PROMOCIONES FARMACIAS | Quincenales, una visita TERMINADO por quincena en cada estudio. Semanas 1 y 3: mitad por auditor, redondeada hacia arriba; en semana 3 se prioriza la otra mitad cuando empatan las visitas. Semanas 2 y 4: todos los pendientes de esa quincena, incluidas visitas vacías o rechazadas. Semana 5: solo pendientes de la segunda, sin una tercera medición. |
+| EXHIBICIONES COLGATE | Mensual: solo puntos con cero TERMINADO en ese estudio dentro del rango del mes. |
 | CENCOSUD | Una visita mensual de precios y una de fotografías. El folio deja de seleccionarse cuando ambos estudios tienen TERMINADO; también se acepta el estudio genérico CENCOSUD legado. Nombre genérico configurable. El CSV conserva su código original. |
 | POY y FERIAS LIBRES | Carga completa. |
 
@@ -70,7 +71,7 @@ Una selección no cuenta como visita: solo el export TERMINADO confirma la medic
 
 Se advierte si no hubo medición en la primera quincena, si hay mediciones históricas repetidas dentro de una misma quincena o si un pendiente SOVI no está seleccionado en OSA. El sistema no puede garantizar la ejecución en campo ni recuperar una quincena pasada duplicando visitas en la siguiente. Se conserva siempre la dependencia con OSA.
 
-Las fijas OSA siempre se programan en semana normal, aunque hayan alcanzado cuatro visitas: su objetivo es una por semana de campo. La reducción por feriado afecta solo a fijas OSA y se propaga a estudios dependientes por su selección. El reparto quincenal de SOVI, OSA quincenal y Cruz Verde frecuencia 2 se calcula por auditor.
+Las fijas OSA siempre se programan en semana normal, aunque hayan alcanzado cuatro visitas: su objetivo es una por semana de campo. La reducción por feriado afecta solo a fijas OSA y se propaga a estudios dependientes por su selección. El reparto quincenal de SOVI, OSA quincenal, Cruz Verde frecuencia 2, PRECIOS COLGATE y COLGATE PROMOCIONES FARMACIAS se calcula por auditor.
 
 ### Equilibrio de carga
 
