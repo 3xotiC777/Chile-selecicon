@@ -2,6 +2,8 @@ import './dashboard.css';
 import { summarizeTracking, trackingCsv, productivityCsv } from './tracking.js';
 import { DEFAULT_DASHBOARD_FILTERS, dashboardScopes, clearDashboardDetailFilters } from './dashboard-filters.js';
 import { DASHBOARD_SORT_DEFAULTS, DASHBOARD_SORT_COLUMNS, sortDashboardRows, pointStatusLabel } from './dashboard-sort.js';
+import {summarizeWeeklyProgress} from './weekly-progress.js';
+import {weeklyChartMarkup,weeklyDetailText} from './weekly-chart.js';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
 const number = value => Number(value || 0).toLocaleString('es-CL');
@@ -51,7 +53,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
   const filters = {...DEFAULT_DASHBOARD_FILTERS};
   const orders = {auditors:{...DASHBOARD_SORT_DEFAULTS.auditors},points:{...DASHBOARD_SORT_DEFAULTS.points}};
   let data = null, metadata = {}, page = 1, loading = false, error = '', exporting = false;
-  let currentPoints = [], currentMonthlyPoints = [], currentAuditors = [];
+  let currentPoints = [], currentMonthlyPoints = [], currentAuditors = [], weeklySeries = null, selectedWeek = null, weeklyCalendarKey = null;
   const controller = new AbortController();
   const listen = (element, type, handler) => element.addEventListener(type, handler, {signal:controller.signal});
   const find = name => container.querySelector(`[data-dashboard="${name}"]`);
@@ -83,6 +85,11 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
       <p data-dashboard="monthly-scope" class="tracking-summary-scope" aria-live="polite"></p>
       <section data-dashboard="metrics" class="tracking-metrics" aria-label="Resumen de cumplimiento"></section>
       <div data-dashboard="alerts" class="tracking-alerts"></div>
+      <section class="tracking-section tracking-weekly-chart" aria-labelledby="${prefix}-weekly-title">
+        <div class="tracking-section-heading"><div><p class="eyebrow">MEDICIONES POR SEMANA</p><h2 id="${prefix}-weekly-title">Avance por semana del mes</h2></div></div>
+        <p class="tracking-small">Mediciones que cumplen la meta mensual, según la frecuencia de cada punto. SOVI cuenta una medición por los ocho estudios completos.</p>
+        <div data-dashboard="weekly"></div>
+      </section>
       <section class="tracking-section" aria-labelledby="${prefix}-studies-title">
         <div class="tracking-section-heading"><div><p class="eyebrow">MEDICIONES DEL MES</p><h2 id="${prefix}-studies-title">Avance por estudio</h2></div><p data-dashboard="coverage" class="tracking-small"></p></div>
         <p class="tracking-small">El avance compara mediciones cumplidas con la meta mensual. Una medición SOVI requiere los ocho estudios TERMINADO de la misma semana.</p>
@@ -156,6 +163,24 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     find('studies').innerHTML = studies.length ? `<table class="tracking-table tracking-study-table"><thead><tr><th>Cliente / estudio</th><th>Avance mensual</th><th class="number">Mediciones</th><th class="number">Puntos cumplidos</th><th class="number">Pendientes</th></tr></thead><tbody>${studies.map(study => `<tr><td><small>${field(study.client)}</small><strong>${field(study.study)}</strong></td><td class="tracking-progress-cell">${study.hasTarget?`<div class="tracking-progress-label"><span>${percentage(study.progress)}</span>${study.complete ? '<em>Todos los puntos cumplidos</em>' : ''}</div><div class="tracking-progress" role="progressbar" aria-label="Avance de ${escape(study.study)}" aria-valuenow="${Math.round(Number(study.progress)||0)}" aria-valuemin="0" aria-valuemax="100"><span style="width:${Math.min(100,Math.max(0,Number(study.progress)||0))}%"></span></div>`:'<span class="tracking-badge unknown">Sin meta configurada</span>'}</td><td class="number">${study.hasTarget?`${number(study.fulfilledVisits)} <span class="tracking-muted">/ ${number(study.target)}</span>`:'—'}</td><td class="number">${number(study.completedPoints)} <span class="tracking-muted">/ ${number(study.points)}</span></td><td class="number">${study.hasTarget?number(study.remaining):'—'}</td></tr>`).join('')}</tbody></table>` : '<div class="tracking-no-results">No hay estudios para estos filtros.</div>';
   }
 
+  function renderWeekly(points) {
+    weeklySeries=summarizeWeeklyProgress(points,data.period);
+    const calendarKey=JSON.stringify([data.period?.month,weeklySeries.weeks[0]?.start,weeklySeries.weeks.at(-1)?.end]);
+    if(calendarKey!==weeklyCalendarKey){selectedWeek=null;weeklyCalendarKey=calendarKey;}
+    if(!weeklySeries.weeks.some(week=>week.week===selectedWeek))selectedWeek=weeklySeries.weeks.findLast(week=>week.hasRecords)?.week||weeklySeries.weeks[0]?.week||null;
+    find('weekly').innerHTML=weeklyChartMarkup(weeklySeries,{pointCount:points.length,selectedWeek});
+  }
+
+  function selectWeeklyDetail(week) {
+    const selected=weeklySeries?.weeks.find(row=>row.week===week);
+    if(!selected||!find('weekly-detail'))return;
+    selectedWeek=week;find('weekly-detail').textContent=weeklyDetailText(weeklySeries,selected);
+    container.querySelectorAll('[data-weekly-week]').forEach(button=>{
+      const active=Number(button.dataset.weeklyWeek)===week;
+      button.classList.toggle('is-active',active);button.setAttribute('aria-pressed',String(active));
+    });
+  }
+
   function sortHeaders(table) {
     const order = orders[table];
     return TABLE_HEADERS[table].map(([key,label,numeric]) => {
@@ -212,6 +237,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     renderMetrics(summary,monthlyPoints);
     const pending = monthlyPoints.filter(point => !point.complete && !point.validVisits).length;
     find('alerts').innerHTML = pending ? `<span><i aria-hidden="true"></i>${number(pending)} puntos y estudios del mes todavía no tienen una visita válida.</span>` : monthlyPoints.length ? '<span class="tracking-complete-message">Todos los puntos del mes en estos filtros tienen al menos una visita válida.</span>' : '';
+    renderWeekly(monthlyPoints);
     find('coverage').textContent = `${number((aggregate.studies || []).length)} estudios en esta vista`;
     renderStudies(aggregate.studies || []);
     renderAuditors(currentAuditors);
@@ -225,6 +251,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
   }
 
   async function perform(action, details = {}) {
+    if(action==='weekly-detail'){selectWeeklyDetail(Number(details.weeklyWeek));return;}
     if (action === 'sort') {
       const table = details.sortTable, key = details.sortKey;
       if (!Object.hasOwn(DASHBOARD_SORT_COLUMNS,table) || !DASHBOARD_SORT_COLUMNS[table].includes(key)) return;
@@ -282,6 +309,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     if (['client','study'].includes(key)) renderOptions();
     render();
   });
+  listen(container,'focusin',event=>{const button=event.target.closest('[data-weekly-week]');if(button)selectWeeklyDetail(Number(button.dataset.weeklyWeek));});
 
   function setSnapshot(next) {
     metadata=next || {};
@@ -289,7 +317,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     if (!data) {
       Object.assign(filters,DEFAULT_DASHBOARD_FILTERS);
       orders.auditors={...DASHBOARD_SORT_DEFAULTS.auditors};orders.points={...DASHBOARD_SORT_DEFAULTS.points};
-      syncFilterControls();currentPoints=[];currentMonthlyPoints=[];currentAuditors=[];
+      syncFilterControls();currentPoints=[];currentMonthlyPoints=[];currentAuditors=[];weeklySeries=null;selectedWeek=null;weeklyCalendarKey=null;
     }
     page=1;error='';
     if (metadata.lastPlanningAvailable == null) metadata={...metadata,lastPlanningAvailable:Boolean(metadata.planPeriod || data?.planPeriod || data?.points?.some(point => point.plannedCurrentWeek))};
