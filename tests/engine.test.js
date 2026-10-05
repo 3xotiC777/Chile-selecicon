@@ -224,6 +224,22 @@ test('CENCOSUD is monthly and only its own TERMINADO in the operational month ex
   for(const folio of ['2','3','4'])assert(selected(r,'CENCOSUD').has(folio));
   assert.equal(r.files.find(f=>f.name==='CENCOSUD.csv').rows.length,9);
 });
+test('CENCOSUD requires both prices and photographs; repeating only one study cannot meet the quota',()=>{
+  const f=fixture();f.report=[visit('PRECIOS CENCOSUD',1),visit('FOTOGRAFIAS CENCOSUD',1),visit('PRECIOS CENCOSUD',2),visit('PRECIOS CENCOSUD',2,'2026-09-09'),visit('FOTOGRAFIAS CENCOSUD',3)];
+  const r=select(f);assert(!selected(r,'CENCOSUD').has('1'));assert(selected(r,'CENCOSUD').has('2'));assert(selected(r,'CENCOSUD').has('3'));
+  assert.equal(r.decisions.find(d=>d.study==='CENCOSUD'&&d.folio==='1').visits,1);assert.match(r.decisions.find(d=>d.study==='CENCOSUD'&&d.folio==='2').reason,/fotografías pendiente/);
+  assert.equal(r.files.filter(file=>file.name.includes('CENCOSUD')).length,1);assert.equal(r.files.find(file=>file.name==='CENCOSUD.csv').rows.length,9);
+});
+test('CENCOSUD parts obey TERMINADO, operational month and pre-planning cutoff independently',()=>{
+  const f=fixture();f.report=[visit('PRECIOS CENCOSUD',1),visit('FOTOGRAFIAS CENCOSUD',1,'2026-09-08',{status:'VACIO'}),visit('PRECIOS CENCOSUD',2),visit('FOTOGRAFIAS CENCOSUD',2,'2026-08-08'),visit('PRECIOS CENCOSUD',3),visit('FOTOGRAFIAS CENCOSUD',3,'2026-09-14'),visit('PRECIOS CENCOSUD',4),visit('FOTOGRAFIAS CENCOSUD',4,'2026-09-09')];
+  const r=select(f);for(const folio of ['1','2','3'])assert(selected(r,'CENCOSUD').has(folio));assert(!selected(r,'CENCOSUD').has('4'));
+});
+test('CENCOSUD retains a custom generic legacy alias and suppresses generic-absent warnings when parts are present',()=>{
+  const f=fixture();f.options.aliases={CENCOSUD:'CENCOSUD PERSONALIZADO'};f.report=[visit('CENCOSUD',1,'2026-09-08',{study:'CENCOSUD PERSONALIZADO'}),visit('PRECIOS CENCOSUD',2),visit('FOTOGRAFIAS CENCOSUD',2)];
+  let r=select(f);assert(!selected(r,'CENCOSUD').has('1'));assert(!selected(r,'CENCOSUD').has('2'));
+  f.report=f.report.slice(1);r=select(f);assert(!r.warnings.some(w=>w.startsWith('Sin registros')&&w.includes('CENCOSUD')));
+  f.report=[visit('PRECIOS CENCOSUD',2)];r=select(f);assert(selected(r,'CENCOSUD').has('2'));assert(!r.warnings.some(w=>w.startsWith('Sin registros')&&w.includes('CENCOSUD')));
+});
 test('missing frequencies and conflicting universe keys block output',()=>{
   const f=fixture();f.universe=f.universe.filter(r=>!(r.client==='EMBONOR'&&r.folio==='1'));assert.throws(()=>select(f),/frecuencias/);
   const g=fixture();g.universe.push({folio:'1',client:'EMBONOR',frequency:'QUINCENALES'});assert.throws(()=>select(g),/frecuencias/);

@@ -4,6 +4,7 @@ import { DEFAULT_ALIASES,reviewCsv } from './engine.js';
 import { suggestPeriod,operationalMonthStart } from './period.js';
 import { workloadCsv } from './workload.js';
 import { captureFile } from './files.js';
+import { initPortal } from './portal.js';
 const $=id=>document.getElementById(id);
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number=value=>Number(value).toLocaleString('es-CL');
@@ -11,6 +12,7 @@ const CACHE='chile-universe-v1';
 let universe=null,result=null,zip=null,revision=0,periodRevision=0,busy=false,universeTask=null,planningTask=null,planningDates=null;
 const snapshots={},fileLabels={planning:'la planeación',report:'el export',universe:'el universo'};
 let planningOutputSource=null,markedPlanning=null;
+let generatedDraft=null,portal=null;
 $('month').value=new Date().toISOString().slice(0,7);
 $('aliases').innerHTML=Object.entries(DEFAULT_ALIASES).filter(([name])=>name!=='CRUZ VERDE PROFUNDIDAD').map(([name,alias])=>`<label>${escape(name)}<input data-alias="${escape(name)}" value="${escape(alias)}" /></label>`).join('');
 function runWorker(task,data,progress){
@@ -23,7 +25,17 @@ function runWorker(task,data,progress){
     worker.postMessage({task,data});
   });
 }
-function invalidate(){revision++;result=null;zip=null;planningOutputSource=null;markedPlanning=null;$('results').hidden=true;if(!busy)$('status').replaceChildren();}
+function invalidate(){revision++;result=null;zip=null;generatedDraft=null;planningOutputSource=null;markedPlanning=null;$('results').hidden=true;if(!busy)$('status').replaceChildren();}
+function resetSelectionSession(){
+  invalidate();$('results').replaceChildren();$('selection-form').reset();
+  for(const name of Object.keys(snapshots))delete snapshots[name];
+  universe=null;universeTask=null;planningTask=null;planningDates=null;periodRevision=0;
+  $('month').value=new Date().toISOString().slice(0,7);$('forget').hidden=true;
+  for(const name of ['planning','report','universe']){$(name).value='';$(name).closest('.file-box').classList.remove('loaded');}
+  $('planning-name').textContent='Selecciona el Excel con la hoja RETAIL';$('report-name').textContent='Reporte apoyo auditor';$('universe-name').textContent='Selecciona UNIVERSO CHILE.xlsx';
+  try{localStorage.removeItem(CACHE);localStorage.removeItem('chile-auditor-overrides-v1');}catch{}
+  updatePeriod();
+}
 function showStatus(message,error=false,details=[]){$('status').innerHTML=`<div class="status-message ${error?'error':busy?'busy':''}">${escape(message)}${details.length?`<details><summary>Ver ${number(details.length)} observaciones</summary><ul>${details.slice(0,150).map(d=>`<li>${escape(d)}</li>`).join('')}</ul>${details.length>150?'<p>Se muestran las primeras 150. Corrige los datos de origen para continuar.</p>':''}</details>`:''}</div>`;}
 function updatePeriod(){
   const week=Number($('week').value),weeks=Number($('weeks').value),holidays=Number($('holidays').value);
@@ -89,6 +101,15 @@ function renderResults(){
   const m=result.metrics;
   $('results').innerHTML=`<div class="result-header"><div><p class="eyebrow">SELECCIÓN GENERADA</p><h2>Lista para revisar y descargar</h2><p>${escape(result.period.start)} al ${escape(result.period.end)} · semana ${result.period.week} de ${result.period.weeks}</p></div><button type="button" id="download" class="primary">Descargar ZIP <span>↓</span></button></div><div class="metrics">${[[m.points,'Puntos únicos'],[m.rows,'Asignaciones'],[m.files,'Archivos CSV'],[m.auditors,'Auditores']].map(([n,label])=>`<div><strong>${number(n)}</strong><span>${label}</span></div>`).join('')}</div>${result.warnings.length?`<div class="warnings"><strong>Observaciones de la selección</strong><ul>${result.warnings.map(w=>`<li>${escape(w)}</li>`).join('')}</ul></div>`:''}<p class="note">Fijas OSA: ${number(m.fixedTarget)} de ${number(m.fixedTotal)}. SOVI: ${number(m.sovi)} puntos × 8 estudios. Export: ${number(result.history.valid)} encuestas válidas utilizadas; ${number(result.history.duplicates)} duplicadas omitidas.</p><div class="table-wrap"><table><thead><tr><th>Archivo de carga</th><th class="number">Puntos</th><th class="number">Filas</th></tr></thead><tbody>${result.files.map(f=>`<tr><td>${escape(f.name)}</td><td class="number">${number(new Set(f.rows.map(r=>r.folio)).size)}</td><td class="number">${number(f.rows.length)}</td></tr>`).join('')}</tbody></table></div><details><summary>Reparto de SOVI por auditor y frecuencia</summary><div class="table-wrap"><table><thead><tr><th>Auditor</th><th>Frecuencia</th><th class="number">Base de reparto</th><th class="number">Pendientes con OSA</th><th class="number">Seleccionados</th></tr></thead><tbody>${result.soviAuditors.map(a=>`<tr><td>${escape(a.name)} (${escape(a.auditor)})</td><td>${a.frequency==='fixed'?'Fija':'Quincenal'}</td><td class="number">${a.eligible}</td><td class="number">${a.pending}</td><td class="number">${a.selected}</td></tr>`).join('')}</tbody></table></div></details><details><summary>Revisar puntos y motivos de selección</summary><div class="detail-tools"><label>Buscar folio, auditor o estudio<input id="search" placeholder="Ej. folio o nombre del auditor" /></label><button type="button" class="text-button" id="review-download">Descargar detalle de revisión</button></div><p class="note">Quincena ${result.period.half} en curso; la segunda comienza el ${escape(result.period.secondHalfStart)}. Este detalle incluye seleccionados y excluidos, con las visitas de cada quincena. Se descarga por separado; el ZIP solo contiene los CSV de carga.</p><div id="decision-rows" class="detail-table"></div></details>`;
   $('results').hidden=false;
+  if(portal?.canWrite()){
+    const save=document.createElement('button');save.type='button';save.id='save-selection';save.className='secondary';save.textContent='Guardar planeación compartida';
+    $('results').querySelector('.result-header').after(save);
+    save.addEventListener('click',async()=>{
+      save.disabled=true;
+      try{await portal.saveSelection(generatedDraft);save.textContent='Planeación guardada';}
+      catch(e){showStatus(e.message,true);save.disabled=false;}
+    });
+  }
   const downloads=document.createElement('div');downloads.className='result-downloads';
   const zipButton=$('download');zipButton.replaceWith(downloads);downloads.append(zipButton);
   const planningButton=document.createElement('button');planningButton.type='button';planningButton.id='planning-download';planningButton.className='secondary';planningButton.textContent='Descargar planning con selección';downloads.append(planningButton);
@@ -125,6 +146,7 @@ $('selection-form').addEventListener('submit',async event=>{
   event.preventDefault();if(busy)return;invalidate();busy=true;const submittedRevision=revision;
   $('generate').disabled=true;$('generate').textContent='Procesando…';$('selection-form').setAttribute('aria-busy','true');
   try{
+    if(portal&&!portal.canPlan())throw new Error('Solo el administrador puede generar planeaciones.');
     const planningSnapshot=snapshots.planning,reportSnapshot=snapshots.report;
     showStatus('Esperando la lectura de los archivos…');
     await Promise.all([universeTask,planningTask,reportSnapshot?.task]);
@@ -142,7 +164,10 @@ $('selection-form').addEventListener('submit',async event=>{
     showStatus('Leyendo archivos en tu navegador…');
     const loaded=await runWorker('select',{planning:planningSnapshot.bytes,report:reportFile?reportSnapshot.bytes:null,universe,options},message=>showStatus(message));
     if(submittedRevision!==revision){showStatus('Cambiaste los archivos o ajustes durante el cálculo. Genera de nuevo la selección.');return;}
-    result=loaded.data;zip=loaded.zip;planningOutputSource={bytes:planningSnapshot.bytes,points:loaded.points,name:planningFile.name};renderResults();$('status').replaceChildren();$('results').scrollIntoView({behavior:'smooth',block:'start'});
+    result=loaded.data;zip=loaded.zip;generatedDraft={...loaded.context,result,metadata:{planningName:planningFile.name,reportName:reportFile?.name||'',universeName:snapshots.universe?.file.name||'Universo guardado'}};planningOutputSource={bytes:planningSnapshot.bytes,points:loaded.points,name:planningFile.name};renderResults();$('status').replaceChildren();$('results').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){showStatus(e.message,true,e.details);}
   finally{busy=false;$('generate').disabled=false;$('generate').innerHTML='Generar selección <span>→</span>';$('selection-form').removeAttribute('aria-busy');}
 });
+portal=initPortal({runWorker,onWorkspace:workspace=>{
+  if(!busy&&!snapshots.universe&&workspace.universe?.length){universe=workspace.universe;updateUniverse(workspace.metadata.universeName||'Universo compartido');}
+},resetSelection:resetSelectionSession});

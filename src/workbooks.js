@@ -14,6 +14,12 @@ function readWorkbook(bytes,onlySheet) {
   }catch(e){if(e instanceof SelectionError)throw e;throw new SelectionError('No se pudo leer el Excel. Comprueba que no esté protegido, dañado o sea un archivo diferente.');}
 }
 const value=(sheet,r,c)=>sheet[XLSX.utils.encode_cell({r,c})]?.v;
+const textValue=(sheet,r,c)=>c<0?'':String(value(sheet,r,c)??'').trim();
+function metadata(sheet,r,headers){
+  const fields={client:['CLIENTE'],address:['DIRECCION','DIRECCIÓN'],region:['REGION','REGIÓN'],commune:['COMUNA'],chain:['CADENA'],location:['NOMBRE LOCAL','NOMBRE DEL LOCAL','NOMBRE PDV','NOMBRE'],coordinator:['COORDINADOR'],channel:['CANAL']},result={};
+  for(const [field,names] of Object.entries(fields)){const c=headers.findIndex(h=>names.some(n=>normalize(n)===h)),v=textValue(sheet,r,c);if(v)result[field]=v;}
+  return result;
+}
 function requiredId(v,label){const result=id(v);if(!result||!/^\d+$/.test(result)||Number(result)===0)throw new SelectionError(`${label}: falta un código numérico válido.`);return result;}
 export function parsePlanning(bytes){
   const workbook=readWorkbook(bytes,'RETAIL');
@@ -23,6 +29,7 @@ export function parsePlanning(bytes){
   const range=XLSX.utils.decode_range(sheet['!ref']);
   if(normalize(value(sheet,6,1))!=='FOLIOS'&&normalize(value(sheet,6,1))!=='FOLIO')throw new SelectionError('RETAIL no tiene el formato esperado: FOLIOS en B7.');
   const studies=[],rows=[],points=[],warnings=[];let totalFound=false;
+  const headers=Array.from({length:Math.min(range.e.c+1,200)},(_,c)=>normalize(value(sheet,6,c)));
   for(let c=16;c<=range.e.c;c++){
     const name=normalize(value(sheet,6,c));
     if(name==='TOTAL'){totalFound=true;break;}
@@ -43,7 +50,8 @@ export function parsePlanning(bytes){
     if(!enabled.length)continue;
     const folio=requiredId(folioValue,`Folio B${r+1}`),auditor=id(value(sheet,r,15));
     const auditorName=String(value(sheet,r,16)??auditor).trim();
-    for(const s of enabled)rows.push({folio,auditor,auditorName,study:s.name,studyId:s.studyId,start:s.start,end:s.end,sourceRow:r+1});
+    const details=metadata(sheet,r,headers);
+    for(const s of enabled)rows.push({folio,auditor,auditorName,study:s.name,studyId:s.studyId,start:s.start,end:s.end,sourceRow:r+1,...details});
   }
   return {studies,rows,points,warnings};
 }
@@ -76,7 +84,17 @@ export function parseReport(bytes){
   for(let r=t.headerRow+1;r<=t.range.e.r;r++){
     const folio=id(value(t.sheet,r,col('FOLIO'))),study=normalize(value(t.sheet,r,col('ESTUDIO'))),status=normalize(value(t.sheet,r,col('ESTADO')));
     if(!folio&&!study&&!status)continue;
-    rows.push({folio,study,status,day:value(t.sheet,r,col('DIA')),visit:col('VISITA')>=0?id(value(t.sheet,r,col('VISITA'))):''});
+    const row={folio,study,status,day:value(t.sheet,r,col('DIA')),visit:col('VISITA')>=0?id(value(t.sheet,r,col('VISITA'))):''};
+    for(const [field,header] of Object.entries({auditorName:'AUDITOR',auditorCode:'COD_AUDITOR',coordinator:'COORDINADOR',client:'CLIENTE',duration:'DURACION',timeStart:'HORAINICIO',timeEnd:'HORAFIN'}))if(col(header)>=0)row[field]=value(t.sheet,r,col(header))??'';
+    rows.push(row);
   }
   return rows;
+}
+
+// The regional SEGUIMIENTO workbook is an optional reference, not a weekly
+// loading template. N/C means not loaded and never excludes a monthly point.
+export function parseTrackingPlanning(bytes){
+  const names=readWorkbook(bytes).SheetNames;
+  if(names.some(n=>normalize(n)==='RETAIL'))return {...parsePlanning(bytes),sourceType:'retail',canGenerate:true};
+  throw new SelectionError('Este archivo es una guía de seguimiento y no contiene la hoja RETAIL. Sube el planning semanal para obtener la base de puntos habilitados y sus códigos de estudio.',['N/C en SEGUIMIENTO significa no cargado; sus agregados manuales no sustituyen el export de visitas.']);
 }
