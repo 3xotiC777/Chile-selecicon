@@ -139,24 +139,41 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
   $('export-form').addEventListener('submit',async event=>{
     event.preventDefault();if(!admin()||!workspace?.planning)return message('export-status','Primero guarda una base mensual.',true);
     $('update-export').disabled=true;message('export-status','Leyendo el export…');
-    try{const file=$('tracking-export').files[0],loaded=await runWorker('report',await file.arrayBuffer());
-      const preview=await runWorker('tracking',{planning:workspace.planning,universe:workspace.universe,report:loaded.data,options:workspace.metadata.options});
+    try{const base=workspace,sessionRevision=authRevision,file=$('tracking-export').files[0];
+      const assertCurrent=()=>{
+        if(sessionRevision!==authRevision||!admin())throw new Error('Tu sesión cambió. Vuelve a entrar antes de actualizar el export.');
+        if(workspace?.month!==base.month||workspace.revision!==base.revision)throw new Error('El seguimiento cambió mientras procesabas el export. Revisa el mes y vuelve a cargarlo.');
+        if($('tracking-export').files[0]!==file)throw new Error('Cambiaste el archivo durante el procesamiento. Vuelve a actualizar el export.');
+      };
+      const loaded=await runWorker('report',await file.arrayBuffer());
+      const preview=await runWorker('tracking',{planning:base.planning,universe:base.universe,report:loaded.data,options:base.metadata.options});
+      assertCurrent();
       if(!preview.data.daily.length)throw new Error('El export no tiene encuestas fechadas dentro del mes operativo activo. Revisa el archivo y el período.');
-      await cloud.saveWorkspace({month:workspace.month,report:reportForPeriod(loaded.data,preview.data.period),revision:workspace.revision,metadata:{reportName:file.name,reportUpdatedAt:new Date().toISOString()}});
+      await cloud.saveWorkspace({month:base.month,report:reportForPeriod(loaded.data,preview.data.period),revision:base.revision,metadata:{reportName:file.name,reportUpdatedAt:new Date().toISOString()}});
       $('export-form').reset();message('export-status','Export actualizado. Se conservaron las planeaciones y sus ZIP.');await refresh({force:true});
     }catch(e){message('export-status',e.message,true);}finally{$('update-export').disabled=false;}
   });
   $('import-form').addEventListener('submit',async event=>{
     event.preventDefault();if(!admin())return;$('import-save').disabled=true;message('import-status','Leyendo archivos…');
-    try{const planningFile=$('tracking-base').files[0],universeFile=$('tracking-universe').files[0],reportFile=$('tracking-base-report').files[0];
-      const loaded=await runWorker('workspaceInputs',{planning:await planningFile.arrayBuffer(),universeBytes:universeFile?await universeFile.arrayBuffer():null,universe:workspace?.universe,report:reportFile?await reportFile.arrayBuffer():null});
+    try{const base=workspace,sessionRevision=authRevision;
+      const planningFile=$('tracking-base').files[0],universeFile=$('tracking-universe').files[0],reportFile=$('tracking-base-report').files[0];
+      const month=$('import-month').value,week=Number($('import-week').value),weeks=Number($('import-weeks').value),monthRange=importCalendar.requireRange();
+      const assertCurrent=()=>{
+        if(sessionRevision!==authRevision||!admin())throw new Error('Tu sesión cambió. Vuelve a entrar antes de guardar la base.');
+        if(workspace?.month!==base?.month||(workspace?.revision||0)!==(base?.revision||0))throw new Error('El seguimiento cambió mientras procesabas la base. Revisa el mes y vuelve a guardar.');
+        const currentRange=importCalendar.getRange();
+        if($('tracking-base').files[0]!==planningFile||$('tracking-universe').files[0]!==universeFile||$('tracking-base-report').files[0]!==reportFile||$('import-month').value!==month||Number($('import-week').value)!==week||Number($('import-weeks').value)!==weeks||currentRange?.start!==monthRange.start||currentRange?.end!==monthRange.end)throw new Error('Cambiaste los archivos o las fechas durante el procesamiento. Vuelve a guardar la base.');
+      };
+      const loaded=await runWorker('workspaceInputs',{planning:await planningFile.arrayBuffer(),universeBytes:universeFile?await universeFile.arrayBuffer():null,universe:base?.universe,report:reportFile?await reportFile.arrayBuffer():null});
       const {planning,universe,report}=loaded.data;if(!universe?.length)throw new Error('Carga el universo para iniciar el seguimiento.');
-      const month=$('import-month').value,week=Number($('import-week').value),weeks=Number($('import-weeks').value),start=planning.studies[0].start,end=planning.studies[0].end;
-      const options={month,week,weeks,start,end,monthRange:importCalendar.requireRange(),aliases:TRACKING_ALIASES};
+      const start=planning.studies[0].start,end=planning.studies[0].end;
+      const options={month,week,weeks,start,end,monthRange,aliases:TRACKING_ALIASES};
       const checked=await runWorker('tracking',{planning,universe,report,options});
+      assertCurrent();
       if(!checked.data.points.length)throw new Error('La base no tiene puntos para seguir.');
-      if(workspace?.month&&month!==workspace.month&&!confirm(`Iniciar ${month} reemplazará el mes ${workspace.month} y sus ZIP. ¿Guardar la nueva base?`))return;
-      await cloud.saveWorkspace({month,planning,universe,report:reportFile?reportForPeriod(report,checked.data.period):workspace?.month===month?undefined:[],revision:workspace?.revision||0,metadata:{planningName:planningFile.name,universeName:universeFile?.name||workspace?.metadata.universeName||'Universo compartido',...(reportFile?{reportName:reportFile.name}:{}),options}});
+      if(base?.month&&month!==base.month&&!confirm(`Iniciar ${month} reemplazará el mes ${base.month} y sus ZIP. ¿Guardar la nueva base?`))return;
+      assertCurrent();
+      await cloud.saveWorkspace({month,planning,universe,report:reportFile?reportForPeriod(report,checked.data.period):base?.month===month?undefined:[],revision:base?.revision||0,metadata:{planningName:planningFile.name,universeName:universeFile?.name||base?.metadata.universeName||'Universo compartido',...(reportFile?{reportName:reportFile.name}:{}),options}});
       message('import-status','Base guardada. Genera la selección semanal en Planeación para guardar su ZIP.');await refresh({force:true});
     }catch(e){message('import-status',e.message,true);}finally{$('import-save').disabled=false;}
   });
