@@ -41,6 +41,14 @@ test('signed-in users without membership receive no app role', async () => {
   assert.equal((await createCloud({ client }).getAccess()).role, null);
 });
 
+test('background checks request only the revision and report access withdrawal', async () => {
+  const fields=[];let row={revision:5};
+  const client={from(table){assert.equal(table,'chile_workspace');return{select(value){fields.push(value);return this;},eq(){return this;},async maybeSingle(){return{data:row,error:null};}};}};
+  const cloud=createCloud({client});assert.equal(await cloud.getWorkspaceRevision(),5);
+  row=null;await assert.rejects(()=>cloud.getWorkspaceRevision(),error=>error.code==='ACCESS_DENIED');
+  assert.deepEqual(fields,['revision','revision']);
+});
+
 test('export-only cloud updates do not submit replacements for planning, universe or saved selection', async () => {
   const { client, calls } = fakeClient();
   const report = [{ folio: '1', status: 'TERMINADO' }];

@@ -91,6 +91,11 @@ export function createCloud({ url = defaultUrl, key = defaultKey, client } = {})
       const member = checked(await supabase.from('chile_members').select('user_id,role,display_name').eq('user_id', user.id).maybeSingle());
       return { session, user, role: member?.role || null, member };
     },
+    async getWorkspaceRevision() {
+      const row = checked(await supabase.from('chile_workspace').select('revision').eq('id', true).maybeSingle());
+      if (!row) throw new CloudError('Tu acceso al seguimiento fue retirado.', 'ACCESS_DENIED');
+      return row.revision;
+    },
     async loadWorkspace() {
       // The two REST reads may straddle a monthly replacement or weekly save.
       // Check the revision so the dashboard never combines two different commits.

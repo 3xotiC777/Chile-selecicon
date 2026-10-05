@@ -50,7 +50,9 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
     loading=(async()=>{
       try{const current=await cloud.getAccess();if(revision!==authRevision)return;
         if(!current.role){access=null;clearPrivateView();showAccess();message('auth-status','Tu acceso fue retirado. Solicítalo al administrador.',true);await cloud.signOut();return;}
-        access=current;showAccess();const next=await cloud.loadWorkspace();if(revision!==authRevision)return;workspace=next;onWorkspace?.(next);
+        access=current;showAccess();
+        if(workspace&&await cloud.getWorkspaceRevision()===workspace.revision)return;
+        const next=await cloud.loadWorkspace();if(revision!==authRevision)return;workspace=next;onWorkspace?.(next);
         if(!workspace.planning){dashboard.setSnapshot(null);renderPlans();return;}
         const options={...workspace.metadata.options,month:workspace.month};
         const latest=workspace.weeklyPlans[0];
