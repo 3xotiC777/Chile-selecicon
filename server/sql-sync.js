@@ -52,7 +52,7 @@ export async function syncReport(client,actorId,{readReport=readSqlReport}={}){
     throw new SyncError(status,status===400?'Primero guarda la base mensual y confirma su rango de fechas.':'No se pudo iniciar la sincronización.');
   }
   const context=begin.data;
-  if(!context?.started)return {ok:true,skipped:context?.reason||'busy',message:context?.reason==='cooldown'?'Ya se sincronizó hace menos de un minuto.':'Hay una sincronización en curso.'};
+  if(!context?.started)return {ok:true,skipped:context?.reason||'busy',message:context?.reason==='cooldown'?'Ya hubo un intento de actualización hace menos de un minuto. Puedes volver a intentar en unos segundos.':'Hay una sincronización en curso.'};
   try{
     const range={start:context.start,end:context.end};
     const report=await readReport(range);
