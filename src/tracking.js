@@ -100,6 +100,24 @@ function targets(study,f,weeks){
   return {target:null,rule:'unknown',frequency:f??'sin frecuencia',targetLabel:'Meta sin frecuencia válida'};
 }
 
+// Attribute fulfilled quotas to their earliest eligible week, keeping excess
+// surveys and incomplete SOVI components out of the progress timeline.
+function fulfilledWeeks(completedByWeek,goal,period){
+  if(goal.target===null)return [];
+  const result=[],halves=new Set();let remaining=goal.target;
+  for(const [weekStart,count] of [...completedByWeek].sort((a,b)=>a[0].localeCompare(b[0]))){
+    if(remaining<=0)break;
+    let fulfilledVisits;
+    if(goal.rule==='fortnightly'){
+      const half=weekStart<period.secondHalfStart?1:2;
+      if(halves.has(half))continue;
+      halves.add(half);fulfilledVisits=1;
+    }else fulfilledVisits=goal.rule==='weekly'?1:Math.min(remaining,count);
+    if(fulfilledVisits>0){result.push({weekStart,fulfilledVisits});remaining-=fulfilledVisits;}
+  }
+  return result;
+}
+
 export function buildTracking({planning,universe=[],report=[],options={}}){
   const period=periodFor(planning,options),aliases={...TRACKING_ALIASES,...options.aliases},lookup=new Map(),warnings=[...(planning.warnings||[])];
   // The one CENCOSUD planning column creates two independently measured goals.
@@ -130,7 +148,7 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
   for(const row of assignments){for(const study of normalize(row.study)==='CENCOSUD'?['PRECIOS CENCOSUD','FOTOGRAFIAS CENCOSUD']:[consolidatedStudy(normalize(row.study))]){const k=key(study,id(row.folio));if(!planned.has(k))planned.set(k,row);}}
   const quality={rows:report.length,duplicates:0,invalidDates:0,invalidCompletedDates:0,undatedEmpty:0,undatedRejected:0,outsidePeriod:0,unknownStudies:0,unplannedPoints:0,invalidDurations:0,missingFrequencies:0,ineligibleSovi:0,incompleteSovi:0,unknownStudyNames:[]};
   const aggregates=new Map(),soviWeeks=new Map(),dailyMap=new Map(),seen=new Set(),unknownNames=new Set();
-  const metricFor=(study,folio)=>{const k=key(study,folio);if(!aggregates.has(k))aggregates.set(k,{valid:0,empty:0,rejected:0,other:0,undatedEmpty:0,undatedRejected:0,attempts:0,firstHalf:0,secondHalf:0,weeks:new Set(),lastVisit:null,currentWeekValid:0});return aggregates.get(k);};
+  const metricFor=(study,folio)=>{const k=key(study,folio);if(!aggregates.has(k))aggregates.set(k,{valid:0,empty:0,rejected:0,other:0,undatedEmpty:0,undatedRejected:0,attempts:0,firstHalf:0,secondHalf:0,weeks:new Set(),completedByWeek:new Map(),lastVisit:null,currentWeekValid:0});return aggregates.get(k);};
   let lastReportDay=null;
   for(const row of report){
     const canonical=lookup.get(normalize(row.study)),study=consolidatedStudy(canonical||normalize(row.study)),folio=id(row.folio),group=statusGroup(row.status);
@@ -166,6 +184,7 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
     const metric=metricFor(study,folio);metric.attempts++;if(!metric.lastVisit||day>metric.lastVisit)metric.lastVisit=day;
     if(group==='completed'){
       metric.valid++;metric.weeks.add(monday(day));metric[day<period.secondHalfStart?'firstHalf':'secondHalf']++;
+      const weekStart=monday(day);metric.completedByWeek.set(weekStart,(metric.completedByWeek.get(weekStart)||0)+1);
       if(day>=period.start&&day<=period.end)metric.currentWeekValid++;
       if(SOVI.includes(canonical)){
         if(!soviWeeks.has(folio))soviWeeks.set(folio,new Map());const byWeek=soviWeeks.get(folio),wk=monday(day);if(!byWeek.has(wk))byWeek.set(wk,new Set());byWeek.get(wk).add(canonical);
@@ -180,22 +199,25 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
     const study=consolidatedStudy(row.study),pKey=key(study,row.folio);if(pointKeys.has(pKey))continue;pointKeys.add(pKey);
     if(study==='SOVI EMBONOR'&&!SOVI.every(s=>master.has(key(s,row.folio)))){quality.ineligibleSovi++;continue;}
     const client=clientFor(row.study,row.client),f=freqMap.get(key(CV.includes(row.study)?'CRUZ VERDE':'EMBONOR',row.folio))??frequency(row.frequency);
-    const goal=targets(study,f,period.weeks),metric=aggregates.get(pKey)||{valid:0,empty:0,rejected:0,other:0,attempts:0,firstHalf:0,secondHalf:0,weeks:new Set(),lastVisit:null,currentWeekValid:0};
+    const goal=targets(study,f,period.weeks),metric=aggregates.get(pKey)||{valid:0,empty:0,rejected:0,other:0,attempts:0,firstHalf:0,secondHalf:0,weeks:new Set(),completedByWeek:new Map(),lastVisit:null,currentWeekValid:0};
     let validVisits=metric.valid,visitsFirstHalf=metric.firstHalf,visitsSecondHalf=metric.secondHalf,weeklyVisits=metric.weeks.size,currentWeekCompleted=metric.currentWeekValid>0,incompleteWeeks=0;
+    let completedByWeek=metric.completedByWeek;
     const partialSovi=[];
     if(study==='SOVI EMBONOR'){
       validVisits=0;visitsFirstHalf=0;visitsSecondHalf=0;weeklyVisits=0;currentWeekCompleted=false;
+      completedByWeek=new Map();
       for(const [wk,completed] of soviWeeks.get(row.folio)||[]){
-        if(completed.size===8){validVisits++;weeklyVisits++;if(wk<period.secondHalfStart)visitsFirstHalf++;else visitsSecondHalf++;if(wk===monday(period.start))currentWeekCompleted=true;}
+        if(completed.size===8){validVisits++;weeklyVisits++;completedByWeek.set(wk,1);if(wk<period.secondHalfStart)visitsFirstHalf++;else visitsSecondHalf++;if(wk===monday(period.start))currentWeekCompleted=true;}
         else {incompleteWeeks++;partialSovi.push({weekStart:wk,completedStudies:completed.size,missingStudies:SOVI.filter(s=>!completed.has(s))});}
       }
       if(incompleteWeeks)quality.incompleteSovi++;
     }
     if(goal.target===null)quality.missingFrequencies++;
     const fulfilledVisits=goal.target===null?0:goal.rule==='fortnightly'?Math.min(1,visitsFirstHalf)+Math.min(1,visitsSecondHalf):goal.rule==='weekly'?Math.min(goal.target,weeklyVisits):Math.min(goal.target,validVisits);
+    const fulfilledByWeek=fulfilledWeeks(completedByWeek,goal,period);
     const remaining=goal.target===null?null:Math.max(0,goal.target-fulfilledVisits),complete=goal.target!==null&&remaining===0,plan=planned.get(pKey);
     const status=complete?'complete':fulfilledVisits>0?'partial':metric.rejected>0?'rejected':metric.empty>0?'empty':'pending';
-    points.push({folio:row.folio,client,study,studyId:study==='SOVI EMBONOR'?null:row.studyId||null,auditor:row.auditor,auditorName:row.auditorName,coordinator:row.coordinator||'',location:row.location||row.address||'',address:row.address||'',region:row.region||'',commune:row.commune||'',chain:row.chain||'',...goal,validVisits,fulfilledVisits,remaining,progress:percent(fulfilledVisits,goal.target),visitsFirstHalf,visitsSecondHalf,weeklyVisits,empty:metric.empty,rejected:metric.rejected,other:metric.other,undatedEmpty:metric.undatedEmpty||0,undatedRejected:metric.undatedRejected||0,attempts:metric.attempts,lastVisit:metric.lastVisit,plannedCurrentWeek:!!plan,plannedWeekStart:plan?.start||null,plannedWeekEnd:plan?.end||null,currentWeekCompleted,plannedPending:!!plan&&!currentWeekCompleted,incompleteWeeks,partialSovi,complete,status,excessVisits:Math.max(0,validVisits-fulfilledVisits)});
+    points.push({folio:row.folio,client,study,studyId:study==='SOVI EMBONOR'?null:row.studyId||null,auditor:row.auditor,auditorName:row.auditorName,coordinator:row.coordinator||'',location:row.location||row.address||'',address:row.address||'',region:row.region||'',commune:row.commune||'',chain:row.chain||'',...goal,validVisits,fulfilledVisits,fulfilledByWeek,remaining,progress:percent(fulfilledVisits,goal.target),visitsFirstHalf,visitsSecondHalf,weeklyVisits,empty:metric.empty,rejected:metric.rejected,other:metric.other,undatedEmpty:metric.undatedEmpty||0,undatedRejected:metric.undatedRejected||0,attempts:metric.attempts,lastVisit:metric.lastVisit,plannedCurrentWeek:!!plan,plannedWeekStart:plan?.start||null,plannedWeekEnd:plan?.end||null,currentWeekCompleted,plannedPending:!!plan&&!currentWeekCompleted,incompleteWeeks,partialSovi,complete,status,excessVisits:Math.max(0,validVisits-fulfilledVisits)});
   }
   points.sort((a,b)=>sorted(a.client,b.client)||sorted(a.study,b.study)||sorted(a.auditorName,b.auditorName)||sorted(a.folio,b.folio));
   const daily=[...dailyMap.values()].map(d=>({...d,minutes:Math.round(d.minutes*10000)/10000})).sort((a,b)=>sorted(a.day,b.day)||sorted(a.auditor,b.auditor)||sorted(a.study,b.study));
