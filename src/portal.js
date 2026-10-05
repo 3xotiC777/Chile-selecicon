@@ -173,7 +173,7 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
       if(!checked.data.points.length)throw new Error('La base no tiene puntos para seguir.');
       if(base?.month&&month!==base.month&&!confirm(`Iniciar ${month} reemplazará el mes ${base.month} y sus ZIP. ¿Guardar la nueva base?`))return;
       assertCurrent();
-      await cloud.saveWorkspace({month,planning,universe,report:reportFile?reportForPeriod(report,checked.data.period):base?.month===month?undefined:[],revision:base?.revision||0,metadata:{planningName:planningFile.name,universeName:universeFile?.name||base?.metadata.universeName||'Universo compartido',...(reportFile?{reportName:reportFile.name}:{}),options}});
+      await cloud.saveWorkspace({month,planning,universe,report:reportFile?reportForPeriod(report,checked.data.period):base?.month===month?reportForPeriod(base.report,checked.data.period):[],revision:base?.revision||0,metadata:{planningName:planningFile.name,universeName:universeFile?.name||base?.metadata.universeName||'Universo compartido',...(reportFile?{reportName:reportFile.name}:{}),options}});
       message('import-status','Base guardada. Genera la selección semanal en Planeación para guardar su ZIP.');await refresh({force:true});
     }catch(e){message('import-status',e.message,true);}finally{$('import-save').disabled=false;}
   });
