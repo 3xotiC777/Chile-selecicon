@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {select,buildHistory,csvRows,isoDate,DEFAULT_ALIASES,OSA,REPLICAS,SOVI,FACING,CV,MONTHLY} from '../src/engine.js';
-const names=[OSA,...REPLICAS,...SOVI,FACING,...CV,...MONTHLY,'POY','FERIAS LIBRES'];
+import {select,buildHistory,csvRows,isoDate,DEFAULT_ALIASES,OSA,REPLICAS,SOVI,FACING,CV,FORTNIGHTLY,MONTHLY} from '../src/engine.js';
+const names=[OSA,...REPLICAS,...SOVI,FACING,...CV,...FORTNIGHTLY,...MONTHLY,'POY','FERIAS LIBRES'];
 function fixture(){
   const studies=names.map((name,i)=>({name,studyId:String(i+100),start:'2026-09-14',end:'2026-09-19'}));
   const rows=studies.flatMap(s=>Array.from({length:10},(_,i)=>({folio:String(i+1),auditor:i<5?'101':'102',auditorName:i<5?'Auditor A':'Auditor B',study:s.name,studyId:s.studyId,start:s.start,end:s.end,sourceRow:i+8})));
@@ -242,7 +242,7 @@ test('Cruz Verde counts each study separately and observes frequencies 2,3,4',()
   const f=fixture();for(let folio=1;folio<=3;folio++)for(let d=1;d<=folio+1;d++)f.report.push(visit(CV[0],folio,`2026-09-0${d}`));
   const r=select(f);for(const folio of ['1','2','3']){assert(!selected(r,CV[0]).has(folio));assert(selected(r,CV[1]).has(folio));}
 });
-test('Colgate is monthly and POY / FERIAS are complete',()=>{
+test('Exhibiciones Colgate and Cencosud are monthly and POY / FERIAS are complete',()=>{
   const f=fixture();f.report=MONTHLY.map(s=>visit(s,1));const r=select(f);for(const s of MONTHLY){assert.equal(selected(r,s).size,9);assert(!selected(r,s).has('1'));}assert.equal(selected(r,'POY').size,10);assert.equal(selected(r,'FERIAS LIBRES').size,10);
 });
 test('CENCOSUD is monthly and only its own TERMINADO in the operational month excludes a point',()=>{

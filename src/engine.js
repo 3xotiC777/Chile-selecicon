@@ -8,7 +8,8 @@ export const REPLICAS = ['OSA VINOS EMBONOR','EXHIBICIONES ADICIONALES EMBONOR',
 export const SOVI = ['SOVI EMBONOR EXHIBICIONES COMPETENCIA','SOVI EMBONOR SSD','SOVI EMBONOR JUGOS','SOVI EMBONOR AGUAS','SOVI EMBONOR ENERGETICAS','SOVI EMBONOR ISOTONICOS','SOVI EMBONOR COOLER','SOVI EMBONOR CHECKOUT'];
 export const FACING = 'FACING ABI EMBONOR';
 export const CV = ['QUIEBRES CRUZ VERDE','CRUZ VERDE PROFUNDIDAD'];
-export const MONTHLY = ['PRECIOS COLGATE','EXHIBICIONES COLGATE','COLGATE PROMOCIONES FARMACIAS','CENCOSUD'];
+export const FORTNIGHTLY = ['PRECIOS COLGATE','COLGATE PROMOCIONES FARMACIAS'];
+export const MONTHLY = ['EXHIBICIONES COLGATE','CENCOSUD'];
 const CENCOSUD_PARTS=['PRECIOS CENCOSUD','FOTOGRAFIAS CENCOSUD'];
 const CENCOSUD_INTERNAL_ALIASES=Object.fromEntries(CENCOSUD_PARTS.map(name=>[name,name]));
 export const DEFAULT_ALIASES = {
@@ -117,17 +118,20 @@ export function buildHistory(report, {month,start,end,aliases,week=suggestPeriod
 
 // Opening weeks use half of the cohort per auditor. Closing weeks select all
 // remaining points, including unsuccessful visits, without repeating completions.
-function chooseFortnight(rows,capacityRows,count,halfCount,week){
+function chooseFortnight(rows,capacityRows,count,halfCount,week,alternateOpening=false){
   const half=week<=2?1:2,opening=week===1||week===3;
   const groups=new Map();
   for(const r of capacityRows){
-    if(!groups.has(r.auditor))groups.set(r.auditor,{auditor:r.auditor,name:r.auditorName,eligible:0,candidates:[]});
-    groups.get(r.auditor).eligible++;
+    if(!groups.has(r.auditor))groups.set(r.auditor,{auditor:r.auditor,name:r.auditorName,eligible:0,base:[],candidates:[]});
+    groups.get(r.auditor).eligible++;groups.get(r.auditor).base.push(r);
   }
   for(const r of rows)if(count(r.folio)<2&&halfCount(r.folio,half)===0)groups.get(r.auditor)?.candidates.push(r);
   const chosen=new Set(),auditors=[];
   for(const group of groups.values()){
-    const pending=group.candidates.sort((a,b)=>count(a.folio)-count(b.folio)||compareId(a.folio,b.folio));
+    // Colgate starts the second half with the other cohort when visit counts tie.
+    // Pending points with fewer valid visits retain their existing priority.
+    const openingOrder=alternateOpening&&week===3?new Map([...group.base].sort((a,b)=>compareId(a.folio,b.folio)).map((row,index)=>[row.folio,(index+group.eligible-Math.ceil(group.eligible/2))%group.eligible])):null;
+    const pending=group.candidates.sort((a,b)=>count(a.folio)-count(b.folio)||(openingOrder?openingOrder.get(a.folio)-openingOrder.get(b.folio):0)||compareId(a.folio,b.folio));
     const selected=pending.slice(0,opening?Math.ceil(group.eligible/2):pending.length);
     selected.forEach(r=>chosen.add(r.folio));
     auditors.push({auditor:group.auditor,name:group.name,eligible:group.eligible,pending:pending.length,selected:selected.length});
@@ -165,7 +169,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(week>1&&!hasReport)fail('Desde la semana 2 necesitas el export de visitas.');
   if(!planning.rows.length)fail('La hoja RETAIL no tiene puntos habilitados.');
   const studies=new Map(planning.studies.map(s=>[s.name,s]));
-  const known=new Set([OSA,...REPLICAS,...SOVI,FACING,...CV,...MONTHLY,'POY','FERIAS LIBRES']);
+  const known=new Set([OSA,...REPLICAS,...SOVI,FACING,...CV,...FORTNIGHTLY,...MONTHLY,'POY','FERIAS LIBRES']);
   const unknown=[...studies.keys()].filter(s=>!known.has(s));
   if(unknown.length)fail('Hay estudios sin una regla de selección definida.',unknown);
   const starts=[...new Set(planning.studies.map(s=>s.start))],ends=[...new Set(planning.studies.map(s=>s.end))];
@@ -196,7 +200,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     if(frequencies.has(key)&&frequencies.get(key)!==f)frequencyProblems.push(`Universo: ${r.client}, folio ${r.folio}, frecuencias contradictorias.`);
     frequencies.set(key,f);
   }
-  const freq=row=>frequencies.get(JSON.stringify([CV.includes(row.study)?'CRUZ VERDE':'EMBONOR',row.folio]));
+  const freq=row=>FORTNIGHTLY.includes(row.study)?'fortnightly':frequencies.get(JSON.stringify([CV.includes(row.study)?'CRUZ VERDE':'EMBONOR',row.folio]));
   for(const row of planning.rows){
     if([OSA,...SOVI,FACING,...CV].includes(row.study)){
       const f=freq(row),valid=CV.includes(row.study)?[2,3,4].includes(f):['fixed','fortnightly'].includes(f);
@@ -215,10 +219,10 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   const assign=(study,folio)=>assignments.get(study)?.add(folio);
   const decide=(row,selected,visits,reason)=>{
     if(selected)assign(row.study,row.folio);
-    const isSovi=SOVI.includes(row.study),isFortnightly=isSovi||row.study===OSA&&freq(row)==='fortnightly'||CV.includes(row.study)&&freq(row)===2;
+    const isSovi=SOVI.includes(row.study),isFortnightly=isSovi||FORTNIGHTLY.includes(row.study)||row.study===OSA&&freq(row)==='fortnightly'||CV.includes(row.study)&&freq(row)===2;
     const visitsFirstHalf=isFortnightly?(isSovi?history.soviHalfCount(row.folio,1):history.halfCount(row.study,row.folio,1)):null;
     const visitsSecondHalf=isFortnightly?(isSovi?history.soviHalfCount(row.folio,2):history.halfCount(row.study,row.folio,2)):null;
-    decisions.push({...row,frequency:freq(row)??'mensual / completa',visits,visitsFirstHalf,visitsSecondHalf,selected,reason});
+    decisions.push({...row,frequency:FORTNIGHTLY.includes(row.study)?'quincenal':freq(row)??'mensual / completa',visits,visitsFirstHalf,visitsSecondHalf,selected,reason});
   };
   // Independent studies establish the route load before the discretionary
   // holiday sample is chosen. Their frequency and closing rules stay intact.
@@ -228,6 +232,13 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     for(const r of rows(s)){
       const v=history.count(s,r.folio),target=freq(r),yes=target===2?selection.chosen.has(r.folio):v<target;
       decide(r,yes,v,target===2?fortnightReason(yes,v,history.halfCount(s,r.folio,half),week):yes?`Frecuencia mensual pendiente: ${v}/${target}`:`Frecuencia mensual cumplida: ${v}/${target}`);
+    }
+  }
+  for(const s of FORTNIGHTLY){
+    const base=rows(s),selection=chooseFortnight(base,base,f=>history.count(s,f),(f,h)=>history.halfCount(s,f,h),week,true);
+    for(const r of base){
+      const v=history.count(s,r.folio),yes=selection.chosen.has(r.folio);
+      decide(r,yes,v,fortnightReason(yes,v,history.halfCount(s,r.folio,half),week));
     }
   }
   for(const s of MONTHLY)for(const r of rows(s)){

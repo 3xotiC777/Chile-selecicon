@@ -44,8 +44,8 @@ function updatePeriod(){
   const week=Number($('week').value),weeks=Number($('weeks').value),holidays=Number($('holidays').value);
   $('report').required=week>1;
   $('report-required').textContent=week===1?'Opcional en semana 1':'Obligatorio desde semana 2';
-  const schedule=week===1||week===3?'primera mitad por auditor.':week===5?'solo pendientes; sin tercera medición.':'segunda mitad y visitas pendientes de esta quincena.';
-  $('period-note').textContent=`${week<3?'Primera':'Segunda'} quincena · ${schedule} Aplica a SOVI, OSA quincenal y Cruz Verde de frecuencia 2. ${week===weeks?'Última semana: Facing puede coincidir con SOVI para cerrar pendientes.':''} ${holidays?'Fijas OSA: '+(100-17*holidays)+' % de la base.':'Fijas OSA: todas las de la planeación.'}`;
+  const schedule=week===1||week===3?'mitad por auditor.':week===5?'solo pendientes; sin tercera medición.':'segunda mitad y visitas pendientes de esta quincena.';
+  $('period-note').textContent=`${week<3?'Primera':'Segunda'} quincena · ${schedule} Aplica a SOVI, OSA quincenal, Cruz Verde de frecuencia 2, Precios Colgate y Colgate Promociones Farmacias. ${week===weeks?'Última semana: Facing puede coincidir con SOVI para cerrar pendientes.':''} ${holidays?'Fijas OSA: '+(100-17*holidays)+' % de la base.':'Fijas OSA: todas las de la planeación.'}`;
   document.querySelectorAll('.week-track span').forEach((s,i)=>s.classList.toggle('active',i+1===week));$('track5').hidden=weeks===4;
   updateDates();
   updateReady();
