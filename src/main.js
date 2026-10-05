@@ -5,6 +5,7 @@ import { suggestPeriod,operationalMonthStart } from './period.js';
 import { workloadCsv } from './workload.js';
 import { captureFile } from './files.js';
 import { initPortal } from './portal.js';
+import { mountMonthRange } from './month-range.js';
 const $=id=>document.getElementById(id);
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number=value=>Number(value).toLocaleString('es-CL');
@@ -14,6 +15,7 @@ const snapshots={},fileLabels={planning:'la planeación',report:'el export',univ
 let planningOutputSource=null,markedPlanning=null;
 let generatedDraft=null,portal=null;
 $('month').value=new Date().toISOString().slice(0,7);
+const selectionCalendar=mountMonthRange($('selection-month-range'),{month:$('month').value,onChange:()=>{periodRevision++;invalidate();updatePeriod();},onSave:(month,range)=>portal?.saveMonthRange(month,range)});
 $('aliases').innerHTML=Object.entries(DEFAULT_ALIASES).filter(([name])=>name!=='CRUZ VERDE PROFUNDIDAD').map(([name,alias])=>`<label>${escape(name)}<input data-alias="${escape(name)}" value="${escape(alias)}" /></label>`).join('');
 function runWorker(task,data,progress){
   return new Promise((resolve,reject)=>{
@@ -30,7 +32,7 @@ function resetSelectionSession(){
   invalidate();$('results').replaceChildren();$('selection-form').reset();
   for(const name of Object.keys(snapshots))delete snapshots[name];
   universe=null;universeTask=null;planningTask=null;planningDates=null;periodRevision=0;
-  $('month').value=new Date().toISOString().slice(0,7);$('forget').hidden=true;
+  $('month').value=new Date().toISOString().slice(0,7);selectionCalendar.setMonth($('month').value,true);$('forget').hidden=true;
   for(const name of ['planning','report','universe']){$(name).value='';$(name).closest('.file-box').classList.remove('loaded');}
   $('planning-name').textContent='Selecciona el Excel con la hoja RETAIL';$('report-name').textContent='Reporte apoyo auditor';$('universe-name').textContent='Selecciona UNIVERSO CHILE.xlsx';
   try{localStorage.removeItem(CACHE);localStorage.removeItem('chile-auditor-overrides-v1');}catch{}
@@ -38,6 +40,7 @@ function resetSelectionSession(){
 }
 function showStatus(message,error=false,details=[]){$('status').innerHTML=`<div class="status-message ${error?'error':busy?'busy':''}">${escape(message)}${details.length?`<details><summary>Ver ${number(details.length)} observaciones</summary><ul>${details.slice(0,150).map(d=>`<li>${escape(d)}</li>`).join('')}</ul>${details.length>150?'<p>Se muestran las primeras 150. Corrige los datos de origen para continuar.</p>':''}</details>`:''}</div>`;}
 function updatePeriod(){
+  selectionCalendar.setMonth($('month').value);
   const week=Number($('week').value),weeks=Number($('weeks').value),holidays=Number($('holidays').value);
   $('report').required=week>1;
   $('report-required').textContent=week===1?'Opcional en semana 1':'Obligatorio desde semana 2';
@@ -57,9 +60,10 @@ function updateDates(){
   const original=`Fechas guardadas en RETAIL: ${planningDates.start.split('-').reverse().join('/')} al ${planningDates.end.split('-').reverse().join('/')}.`;
   const mismatch=start&&end&&start.slice(0,7)!==$('month').value&&end.slice(0,7)!==$('month').value;
   note.textContent=original+' '+(mismatch?'Las fechas de carga no incluyen el mes elegido. Corrige las filas 2 y 3 de RETAIL o activa «Usar otras fechas de carga».':manual?'Se usarán las fechas indicadas abajo en todos los CSV y en el corte del export.':start.slice(0,7)!==end.slice(0,7)?'La semana cruza dos meses: elige el mes y la semana operativos que corresponden.':'Se usarán estas fechas en los CSV. El nombre del archivo no determina el período.');
-  if(start)note.textContent+=` Conteo del export: desde ${operationalMonthStart(start,Number($('week').value)).split('-').reverse().join('/')} hasta antes del ${start.split('-').reverse().join('/')}, incluyendo los días del mes anterior que pertenecen a la primera semana operativa.`;
+  const monthRange=selectionCalendar.getRange();
+  if(start)note.textContent+=` Conteo del export: desde ${(monthRange?.start||operationalMonthStart(start,Number($('week').value))).split('-').reverse().join('/')} hasta antes del ${start.split('-').reverse().join('/')}${monthRange?`, dentro del rango mensual guardado hasta ${monthRange.end.split('-').reverse().join('/')}`:', incluyendo los días del mes anterior que pertenecen a la primera semana operativa'}.`;
 }
-function updateReady(){const missing=[];if(!planningDates)missing.push('planeación');if(!universe)missing.push('universo');if((Number($('week').value)>1||$('report').files.length)&&!snapshots.report?.bytes)missing.push('export');$('ready-note').textContent=missing.length?'Falta cargar o terminar de leer: '+missing.join(', ')+'.':'Archivos listos. Genera la selección y revisa el resumen.';}
+function updateReady(){const missing=[];if(!selectionCalendar.getRange())missing.push('confirmar el rango del mes');if(!planningDates)missing.push('planeación');if(!universe)missing.push('universo');if((Number($('week').value)>1||$('report').files.length)&&!snapshots.report?.bytes)missing.push('export');$('ready-note').textContent=missing.length?'Pendiente: '+missing.join(', ')+'.':'Archivos listos. Genera la selección y revisa el resumen.';}
 function updateUniverse(name){$('universe-name').textContent=`${name} · ${number(universe.length)} frecuencias`;$('universe').closest('.file-box').classList.add('loaded');$('forget').hidden=false;updateReady();}
 try{const cached=JSON.parse(localStorage.getItem(CACHE));if(cached?.version===1&&Array.isArray(cached.rows)&&cached.rows.length){universe=cached.rows;updateUniverse(cached.name);}}catch{/* Browser storage may be unavailable. */}
 $('forget').addEventListener('click',()=>{invalidate();universe=null;$('universe').value='';universeTask=null;delete snapshots.universe;try{localStorage.removeItem(CACHE);}catch{}$('universe-name').textContent='Selecciona UNIVERSO CHILE.xlsx';$('universe').closest('.file-box').classList.remove('loaded');$('forget').hidden=true;updateReady();});
@@ -154,7 +158,7 @@ $('selection-form').addEventListener('submit',async event=>{
     if(!universe)throw new Error('Carga UNIVERSO CHILE.xlsx para cruzar las frecuencias.');
     const planningFile=$('planning').files[0],reportFile=$('report').files[0];
     if(!planningFile||!planningSnapshot?.bytes)throw new Error('Carga el archivo de planeación.');
-    const options={month:$('month').value,week:Number($('week').value),weeks:Number($('weeks').value),holidays:Number($('holidays').value),aliases:Object.fromEntries([...document.querySelectorAll('[data-alias]')].map(i=>[i.dataset.alias,i.value]))};
+    const options={month:$('month').value,monthRange:selectionCalendar.requireRange(),week:Number($('week').value),weeks:Number($('weeks').value),holidays:Number($('holidays').value),aliases:Object.fromEntries([...document.querySelectorAll('[data-alias]')].map(i=>[i.dataset.alias,i.value]))};
     if($('override-dates').checked)options.dateOverride={start:$('load-start').value,end:$('load-end').value};
     options.aliases['CRUZ VERDE PROFUNDIDAD']=$('depth-alias').value;
     options.excludedFolios=$('excluded-folios').value.split(/[,;\s]+/).filter(Boolean);
@@ -170,4 +174,8 @@ $('selection-form').addEventListener('submit',async event=>{
 });
 portal=initPortal({runWorker,onWorkspace:workspace=>{
   if(!busy&&!snapshots.universe&&workspace.universe?.length){universe=workspace.universe;updateUniverse(workspace.metadata.universeName||'Universo compartido');}
+  if(workspace.metadata.options?.monthRange){
+    if(periodRevision===0&&!snapshots.planning){$('month').value=workspace.month;updatePeriod();}
+    selectionCalendar.adoptShared(workspace.month,workspace.metadata.options.monthRange);
+  }
 },resetSelection:resetSelectionSession});

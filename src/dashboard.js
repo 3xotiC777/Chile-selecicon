@@ -1,13 +1,18 @@
 import './dashboard.css';
 import { summarizeTracking, trackingCsv, productivityCsv } from './tracking.js';
+import { DEFAULT_DASHBOARD_FILTERS, dashboardScopes, clearDashboardDetailFilters } from './dashboard-filters.js';
+import { DASHBOARD_SORT_DEFAULTS, DASHBOARD_SORT_COLUMNS, sortDashboardRows, pointStatusLabel } from './dashboard-sort.js';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
 const number = value => Number(value || 0).toLocaleString('es-CL');
 const decimal = value => Number.isFinite(Number(value)) ? Number(value).toLocaleString('es-CL', {maximumFractionDigits:1}) : '—';
 const percentage = value => `${decimal(Math.min(100, Math.max(0, Number(value) || 0)))} %`;
-const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const field = (value, fallback = '—') => escape(value == null || value === '' ? fallback : value);
 const PAGE_SIZE = 40;
+const TABLE_HEADERS = {
+  auditors:[['name','Auditor'],['surveys','Encuestas',true],['completedSurveys','TERMINADO',true],['fieldDays','Días activos',true],['surveysPerDay','Encuestas / día',true],['averageMinutes','Minutos / encuesta',true],['surveyEmpty','Vacías',true],['surveyRejected','Rechazadas',true]],
+  points:[['folio','Punto / estudio'],['auditor','Auditor'],['status','Estado'],['target','Meta',true],['fulfilledVisits','Cumplidas',true],['remaining','Faltan',true],['failures','Vacías / rech.',true],['lastVisit','Última visita'],['planned','Planeación guardada']]
+};
 let instance = 0;
 
 function date(value, includeTime = false) {
@@ -36,20 +41,17 @@ function download(content, filename) {
 }
 
 function pointState(point) {
-  if (point.target == null) return {label:'Sin meta configurada',className:'unknown'};
-  if (point.complete) return {label:'Cumplido',className:'complete'};
-  if (point.rejected > 0) return {label:'Con rechazo',className:'rejected'};
-  if (point.empty > 0) return {label:'Con visita vacía',className:'empty'};
-  return {label:point.validVisits > 0 ? 'En avance' : 'Sin visita válida',className:'pending'};
+  return {label:pointStatusLabel(point),className:point.target == null?'unknown':point.complete?'complete':point.rejected>0?'rejected':point.empty>0?'empty':'pending'};
 }
 
 /** Mounts the shared, read-only field dashboard. Updating source files is handled by the host. */
 export function mountDashboard(container, {snapshot = null, onRefresh, onDownloadPlanning, onExport} = {}) {
   if (!(container instanceof Element)) throw new TypeError('El dashboard necesita un contenedor.');
   const prefix = `tracking-${++instance}`;
-  const filters = {client:'',study:'',auditor:'',region:'',status:'',search:'',planned:false};
+  const filters = {...DEFAULT_DASHBOARD_FILTERS};
+  const orders = {auditors:{...DASHBOARD_SORT_DEFAULTS.auditors},points:{...DASHBOARD_SORT_DEFAULTS.points}};
   let data = null, metadata = {}, page = 1, loading = false, error = '', exporting = false;
-  let currentPoints = [], currentAuditors = [];
+  let currentPoints = [], currentMonthlyPoints = [], currentAuditors = [];
   const controller = new AbortController();
   const listen = (element, type, handler) => element.addEventListener(type, handler, {signal:controller.signal});
   const find = name => container.querySelector(`[data-dashboard="${name}"]`);
@@ -73,11 +75,12 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
         <label for="${prefix}-study">Estudio<select id="${prefix}-study" data-filter="study"><option value="">Todos los estudios</option></select></label>
         <label for="${prefix}-auditor">Auditor<select id="${prefix}-auditor" data-filter="auditor"><option value="">Todos los auditores</option></select></label>
         <label for="${prefix}-region" data-dashboard="region-filter" hidden>Región<select id="${prefix}-region" data-filter="region"><option value="">Todas las regiones</option></select></label>
-        <label for="${prefix}-status">Estado del punto<select id="${prefix}-status" data-filter="status"><option value="">Todos los estados</option><option value="complete">Cumplido</option><option value="pending">Con visitas pendientes</option><option value="unvisited">Sin visita válida</option><option value="empty">Con visitas vacías</option><option value="rejected">Con rechazos</option><option value="planned-pending">Enviados: pendientes de visita</option><option value="planned-complete">Enviados: visitados esta semana</option><option value="unknown">Sin meta configurada</option></select></label>
-        <label class="tracking-search" for="${prefix}-search">Buscar punto<input id="${prefix}-search" type="search" data-filter="search" placeholder="Folio, auditor, dirección o comuna" /></label>
+        <label for="${prefix}-status">Estado en el detalle<select id="${prefix}-status" data-filter="status"><option value="">Todos los estados</option><option value="complete">Cumplido</option><option value="pending">Con visitas pendientes</option><option value="unvisited">Sin visita válida</option><option value="empty">Con visitas vacías</option><option value="rejected">Con rechazos</option><option value="planned-pending">Enviados: pendientes de visita</option><option value="planned-complete">Enviados: visitados esta semana</option><option value="unknown">Sin meta configurada</option></select></label>
+        <label class="tracking-search" for="${prefix}-search">Buscar en el detalle<input id="${prefix}-search" type="search" data-filter="search" placeholder="Folio, auditor, dirección o comuna" /></label>
         <div class="tracking-filter-bottom"><label class="tracking-check"><input type="checkbox" data-filter="planned" /> Solo programados en la última planeación</label><button type="button" class="text-button" data-action="reset">Limpiar filtros</button></div>
       </section>
       <div data-dashboard="plan" class="tracking-plan"></div>
+      <p data-dashboard="monthly-scope" class="tracking-summary-scope" aria-live="polite"></p>
       <section data-dashboard="metrics" class="tracking-metrics" aria-label="Resumen de cumplimiento"></section>
       <div data-dashboard="alerts" class="tracking-alerts"></div>
       <section class="tracking-section" aria-labelledby="${prefix}-studies-title">
@@ -87,11 +90,12 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
       </section>
       <section class="tracking-section" aria-labelledby="${prefix}-auditors-title">
         <div class="tracking-section-heading"><div><p class="eyebrow">TRABAJO REGISTRADO</p><h2 id="${prefix}-auditors-title">Productividad por auditor</h2></div><button type="button" class="text-button" data-action="export-productivity">Descargar productividad</button></div>
-        <p class="tracking-small">Encuestas por día usa los días con actividad registrada. La duración promedio considera las encuestas con un tiempo válido. Los VACIO sin fecha se muestran en los puntos y quedan fuera de la productividad. Aquí aplican los filtros de cliente, estudio y auditor; la búsqueda y el estado filtran los puntos.</p>
+        <p class="tracking-small">Encuestas por día usa los días con actividad registrada. La duración promedio considera las encuestas con un tiempo válido. Los VACIO sin fecha se muestran en los puntos y quedan fuera de la productividad. Aquí aplican cliente, estudio y auditor del export. La región y los filtros del detalle no cambian esta tabla. Pulsa un encabezado para ordenar.</p>
         <div data-dashboard="auditors" class="tracking-table-wrap tracking-auditors"></div>
       </section>
       <section class="tracking-section" aria-labelledby="${prefix}-points-title">
         <div class="tracking-section-heading"><div><p class="eyebrow">PUNTOS Y VISITAS</p><h2 id="${prefix}-points-title">Detalle de cumplimiento</h2></div><p data-dashboard="point-count" class="tracking-small" aria-live="polite"></p></div>
+        <div data-dashboard="detail-scope" class="tracking-detail-scope" aria-live="polite"></div>
         <div data-dashboard="points" class="tracking-table-wrap tracking-points"></div>
         <div data-dashboard="pagination" class="tracking-pagination"></div>
       </section>
@@ -129,23 +133,11 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     find('region-filter').hidden = !regions.length;
   }
 
-  function filteredData() {
-    const matches = point => (!filters.client || point.client === filters.client) && (!filters.study || point.study === filters.study) && (!filters.auditor || String(point.auditor) === filters.auditor);
-    const points = (data.points || []).filter(point => {
-      if (!matches(point) || (filters.region && normalize(point.region) !== normalize(filters.region)) || (filters.planned && !point.plannedCurrentWeek)) return false;
-      if (filters.status === 'complete' && !point.complete) return false;
-      if (filters.status === 'pending' && (point.complete || point.target==null)) return false;
-      if (filters.status === 'unvisited' && point.validVisits > 0) return false;
-      if (filters.status === 'empty' && !point.empty) return false;
-      if (filters.status === 'rejected' && !point.rejected) return false;
-      if (filters.status === 'unknown' && point.target!=null) return false;
-      if (filters.status === 'planned-pending' && (!point.plannedCurrentWeek || !point.plannedPending)) return false;
-      if (filters.status === 'planned-complete' && (!point.plannedCurrentWeek || !point.currentWeekCompleted)) return false;
-      if (filters.search && !normalize([point.folio,point.auditor,point.auditorName,point.location,point.region,point.commune,point.client,point.study].join(' ')).includes(normalize(filters.search))) return false;
-      return true;
+  function syncFilterControls() {
+    container.querySelectorAll('[data-filter]').forEach(control => {
+      if (control.type === 'checkbox') control.checked = Boolean(filters[control.dataset.filter]);
+      else control.value = filters[control.dataset.filter];
     });
-    const daily = (data.daily || []).filter(matches);
-    return {points,daily};
   }
 
   function renderMetrics(summary, points) {
@@ -164,8 +156,17 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     find('studies').innerHTML = studies.length ? `<table class="tracking-table tracking-study-table"><thead><tr><th>Cliente / estudio</th><th>Avance mensual</th><th class="number">Mediciones</th><th class="number">Puntos cumplidos</th><th class="number">Pendientes</th></tr></thead><tbody>${studies.map(study => `<tr><td><small>${field(study.client)}</small><strong>${field(study.study)}</strong></td><td class="tracking-progress-cell">${study.hasTarget?`<div class="tracking-progress-label"><span>${percentage(study.progress)}</span>${study.complete ? '<em>Todos los puntos cumplidos</em>' : ''}</div><div class="tracking-progress" role="progressbar" aria-label="Avance de ${escape(study.study)}" aria-valuenow="${Math.round(Number(study.progress)||0)}" aria-valuemin="0" aria-valuemax="100"><span style="width:${Math.min(100,Math.max(0,Number(study.progress)||0))}%"></span></div>`:'<span class="tracking-badge unknown">Sin meta configurada</span>'}</td><td class="number">${study.hasTarget?`${number(study.fulfilledVisits)} <span class="tracking-muted">/ ${number(study.target)}</span>`:'—'}</td><td class="number">${number(study.completedPoints)} <span class="tracking-muted">/ ${number(study.points)}</span></td><td class="number">${study.hasTarget?number(study.remaining):'—'}</td></tr>`).join('')}</tbody></table>` : '<div class="tracking-no-results">No hay estudios para estos filtros.</div>';
   }
 
+  function sortHeaders(table) {
+    const order = orders[table];
+    return TABLE_HEADERS[table].map(([key,label,numeric]) => {
+      const active = order.key === key;
+      const direction = active && order.direction === 'asc' ? 'descendente' : 'ascendente';
+      return `<th scope="col"${numeric?' class="number"':''} aria-sort="${active?(order.direction==='asc'?'ascending':'descending'):'none'}"><button type="button" class="tracking-sort-button" data-action="sort" data-sort-table="${table}" data-sort-key="${key}" aria-label="${label}: ordenar ${direction}"><span>${label}</span><span class="tracking-sort-arrow" aria-hidden="true">${active?(order.direction==='asc'?'↑':'↓'):'↕'}</span></button></th>`;
+    }).join('');
+  }
+
   function renderAuditors(auditors) {
-    find('auditors').innerHTML = auditors.length ? `<table class="tracking-table"><thead><tr><th>Auditor</th><th class="number">Encuestas</th><th class="number">TERMINADO</th><th class="number">Días activos</th><th class="number">Encuestas / día</th><th class="number">Minutos / encuesta</th><th class="number">Vacías</th><th class="number">Rechazadas</th></tr></thead><tbody>${[...auditors].sort((a,b) => (Number(b.surveys)||0)-(Number(a.surveys)||0) || String(a.auditorName||a.auditor).localeCompare(String(b.auditorName||b.auditor),'es')).map(auditor => `<tr><td><strong>${field(auditor.auditorName || auditor.name || auditor.auditor)}</strong><small>${String(auditor.auditor).startsWith('nombre:')?'Solo en el export':`Código ${field(auditor.auditor)}`}</small></td><td class="number">${number(auditor.surveys)}</td><td class="number">${number(auditor.completedSurveys)}</td><td class="number">${number(auditor.fieldDays)}</td><td class="number">${decimal(auditor.surveysPerDay)}</td><td class="number">${auditor.averageMinutes == null ? '—' : decimal(auditor.averageMinutes)}</td><td class="number">${number(auditor.surveyEmpty??auditor.empty)}</td><td class="number">${number(auditor.surveyRejected??auditor.rejected)}</td></tr>`).join('')}</tbody></table>` : '<div class="tracking-no-results">El export no tiene actividad para este cliente, estudio o auditor.</div>';
+    find('auditors').innerHTML = auditors.length ? `<table class="tracking-table"><thead><tr>${sortHeaders('auditors')}</tr></thead><tbody>${auditors.map(auditor => `<tr><td><strong>${field(auditor.auditorName || auditor.name || auditor.auditor)}</strong><small>${String(auditor.auditor).startsWith('nombre:')?'Solo en el export':`Código ${field(auditor.auditor)}`}</small></td><td class="number">${number(auditor.surveys)}</td><td class="number">${number(auditor.completedSurveys)}</td><td class="number">${number(auditor.fieldDays)}</td><td class="number">${decimal(auditor.surveysPerDay)}</td><td class="number">${auditor.averageMinutes == null ? '—' : decimal(auditor.averageMinutes)}</td><td class="number">${number(auditor.surveyEmpty??auditor.empty)}</td><td class="number">${number(auditor.surveyRejected??auditor.rejected)}</td></tr>`).join('')}</tbody></table>` : '<div class="tracking-no-results">El export no tiene actividad para este cliente, estudio o auditor.</div>';
   }
 
   function renderPoints() {
@@ -173,7 +174,12 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     page = Math.min(page,pages);
     const visible = currentPoints.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE);
     find('point-count').textContent = `${number(currentPoints.length)} puntos y estudios · ${number(new Set(currentPoints.map(point => point.folio)).size)} folios únicos`;
-    find('points').innerHTML = visible.length ? `<table class="tracking-table"><thead><tr><th>Punto / estudio</th><th>Auditor</th><th>Estado</th><th class="number">Meta</th><th class="number">Cumplidas</th><th class="number">Faltan</th><th class="number">Vacías / rech.</th><th>Última visita</th><th>Planeación guardada</th></tr></thead><tbody>${visible.map(point => {
+    const detailFilters = [];
+    if (filters.planned) detailFilters.push('Solo programados en la última planeación');
+    if (filters.status) detailFilters.push(container.querySelector('[data-filter="status"]').selectedOptions[0]?.textContent || filters.status);
+    if (filters.search) detailFilters.push(`Búsqueda: ${filters.search}`);
+    find('detail-scope').innerHTML = `<div><strong>${number(currentPoints.length)} de ${number(currentMonthlyPoints.length)} puntos y estudios del mes</strong>${detailFilters.length ? `<div class="tracking-detail-chips">${detailFilters.map(label => `<span>${escape(label)}</span>`).join('')}</div>` : '<span>Se muestran todos los puntos de los filtros de cliente, estudio, auditor y región.</span>'}</div>${detailFilters.length ? '<button type="button" class="text-button" data-action="clear-detail">Ver todos los puntos del mes</button>' : ''}`;
+    find('points').innerHTML = visible.length ? `<table class="tracking-table"><thead><tr>${sortHeaders('points')}</tr></thead><tbody>${visible.map(point => {
       const state = pointState(point);
       const halves = point.rule === 'fortnightly';
       const partial = point.partialSovi?.length ? `<details class="tracking-sovi-detail"><summary>${number(point.partialSovi.length)} semana${point.partialSovi.length>1?'s':''} SOVI incompleta${point.partialSovi.length>1?'s':''}</summary><ul>${point.partialSovi.map(week => `<li>${date(week.weekStart)}: ${number(week.completedStudies)} de 8 TERMINADO.<br>Faltan: ${(week.missingStudies || []).map(escape).join(', ')}.</li>`).join('')}</ul></details>` : '';
@@ -187,23 +193,25 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     find('content').hidden = !data;
     find('empty').innerHTML = data || loading ? '' : '<div class="tracking-empty"><span aria-hidden="true">↗</span><h2>El seguimiento todavía no tiene datos</h2><p>Guarda la planeación, el universo y el export del mes para compartir el avance con campo. Después podrás actualizar las visitas cargando solo el export.</p></div>';
     if (!data) return;
-    const {points,daily} = filteredData();
-    const aggregate = summarizeTracking(points,[]);
-    const productivityPoints = (data.points || []).filter(point => (!filters.client || point.client===filters.client) && (!filters.study || point.study===filters.study) && (!filters.auditor || String(point.auditor)===filters.auditor));
+    const {monthlyPoints,points,productivityPoints,daily} = dashboardScopes(data,filters);
+    const aggregate = summarizeTracking(monthlyPoints,[]);
     const productivityAggregate = summarizeTracking(productivityPoints,daily);
-    currentPoints = points;
-    currentAuditors = productivityAggregate.auditors || [];
+    currentPoints = sortDashboardRows(points,'points',orders.points.key,orders.points.direction);
+    currentMonthlyPoints = monthlyPoints;
+    currentAuditors = sortDashboardRows(productivityAggregate.auditors || [],'auditors',orders.auditors.key,orders.auditors.direction);
     const summary = aggregate.summary || aggregate;
-    find('period').textContent = `${monthLabel(data.period?.month)} · semana ${data.period?.week || '—'} de ${data.period?.weeks || '—'}`;
+    find('period').textContent = `${monthLabel(data.period?.month)} · semana ${data.period?.week || '—'} de ${data.period?.weeks || '—'}${data.period?.monthRange?` · ${date(data.period.monthRange.start)} al ${date(data.period.monthRange.end)}`:''}`;
     const quality = data.quality || {};
     find('source').innerHTML = `<div><span class="tracking-live-dot" aria-hidden="true"></span><strong>Última actualización</strong><span>${date(metadata.updatedAt || data.updatedAt,true)}</span></div><div><strong>Export</strong><span>${field(metadata.reportName,'Sin nombre de archivo')} · ${number(quality.rows)} registros leídos</span>${data.period?.lastReportDay?`<span>Visitas hasta ${date(data.period.lastReportDay)}</span>`:''}</div>`;
     const planPeriod = metadata.planPeriod || data.planPeriod || {};
     const planned = (data.points || []).filter(point => point.plannedCurrentWeek);
     const plannedPoints = new Set(planned.map(point => point.folio)).size;
-    find('plan').innerHTML = metadata.lastPlanningAvailable || planned.length ? `<div><span class="eyebrow">ÚLTIMA PLANEACIÓN GUARDADA</span><strong>${planPeriod.week ? `Semana ${escape(planPeriod.week)} · ` : ''}${planPeriod.start ? `${date(planPeriod.start)} al ${date(planPeriod.end)}` : field(metadata.planningName,'Planeación guardada')}</strong><span>${number(plannedPoints)} folios programados · ${number(planned.length)} puntos y estudios · ${number(planned.filter(point=>point.plannedPending).length)} pendientes de visita esta semana</span></div><button type="button" class="tracking-button tracking-button-light" data-action="show-planned">Ver puntos programados <span aria-hidden="true">→</span></button>` : '<div><strong>Aún no hay una selección semanal guardada.</strong><span>Genera y guarda una planeación para consultar aquí los puntos programados para campo.</span></div>';
-    renderMetrics(summary,points);
-    const pending = points.filter(point => !point.complete && !point.validVisits).length;
-    find('alerts').innerHTML = pending ? `<span><i aria-hidden="true"></i>${number(pending)} puntos y estudios todavía no tienen una visita válida.</span>` : points.length ? '<span class="tracking-complete-message">Todos los puntos filtrados tienen al menos una visita válida.</span>' : '';
+    find('plan').innerHTML = metadata.lastPlanningAvailable || planned.length ? `<div><span class="eyebrow">ÚLTIMA PLANEACIÓN GUARDADA</span><strong>${planPeriod.week ? `Semana ${escape(planPeriod.week)} · ` : ''}${planPeriod.start ? `${date(planPeriod.start)} al ${date(planPeriod.end)}` : field(metadata.planningName,'Planeación guardada')}</strong><span>${number(plannedPoints)} folios programados · ${number(planned.length)} puntos y estudios · ${number(planned.filter(point=>point.plannedPending).length)} pendientes de visita esta semana</span></div><button type="button" class="tracking-button tracking-button-light" data-action="show-planned" aria-pressed="${filters.planned}">${filters.planned?'Ver todos los puntos':'Ver puntos programados'} <span aria-hidden="true">→</span></button>` : '<div><strong>Aún no hay una selección semanal guardada.</strong><span>Genera y guarda una planeación para consultar aquí los puntos programados para campo.</span></div>';
+    const monthlyScope = [filters.client,filters.study,filters.auditor?`Auditor ${filters.auditor}`:'',filters.region?`Región ${filters.region}`:''].filter(Boolean);
+    find('monthly-scope').textContent = `Avance mensual · ${number(monthlyPoints.length)} puntos y estudios${monthlyScope.length?` · ${monthlyScope.join(' · ')}`:''}. Estado, búsqueda y solo programados filtran el detalle.`;
+    renderMetrics(summary,monthlyPoints);
+    const pending = monthlyPoints.filter(point => !point.complete && !point.validVisits).length;
+    find('alerts').innerHTML = pending ? `<span><i aria-hidden="true"></i>${number(pending)} puntos y estudios del mes todavía no tienen una visita válida.</span>` : monthlyPoints.length ? '<span class="tracking-complete-message">Todos los puntos del mes en estos filtros tienen al menos una visita válida.</span>' : '';
     find('coverage').textContent = `${number((aggregate.studies || []).length)} estudios en esta vista`;
     renderStudies(aggregate.studies || []);
     renderAuditors(currentAuditors);
@@ -216,15 +224,28 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     find('quality').innerHTML = `<div class="tracking-quality-grid">${knownQuality.filter(([key]) => quality[key] != null).map(([key,label]) => `<div><span>${label}</span><strong>${number(quality[key])}</strong></div>`).join('')}</div>${data.warnings?.length?`<ul>${data.warnings.map(warning => `<li>${escape(typeof warning === 'string' ? warning : warning.message || JSON.stringify(warning))}</li>`).join('')}</ul>`:''}<p class="tracking-small">Solo TERMINADO cumple visitas. Las vacías y rechazadas se muestran para seguimiento. Los registros duplicados no aumentan el avance. La productividad contabiliza encuestas; SOVI conserva sus ocho encuestas por medición.</p>`;
   }
 
-  async function perform(action) {
+  async function perform(action, details = {}) {
+    if (action === 'sort') {
+      const table = details.sortTable, key = details.sortKey;
+      if (!Object.hasOwn(DASHBOARD_SORT_COLUMNS,table) || !DASHBOARD_SORT_COLUMNS[table].includes(key)) return;
+      const order = orders[table];
+      orders[table] = {key,direction:order.key===key && order.direction==='asc'?'desc':'asc'};
+      page=1;render();return;
+    }
     if (action === 'reset') {
-      Object.assign(filters,{client:'',study:'',auditor:'',region:'',status:'',search:'',planned:false});
-      container.querySelectorAll('[data-filter]').forEach(control => control.type==='checkbox' ? control.checked=false : control.value='');
+      Object.assign(filters,DEFAULT_DASHBOARD_FILTERS);
+      syncFilterControls();
       page=1;renderOptions();render();return;
+    }
+    if (action === 'clear-detail') {
+      Object.assign(filters,clearDashboardDetailFilters(filters));
+      syncFilterControls();page=1;render();return;
     }
     if (action === 'next' || action === 'previous') {page += action==='next'?1:-1;renderPoints();return;}
     if (action === 'show-planned') {
-      filters.planned=true;container.querySelector('[data-filter="planned"]').checked=true;page=1;render();find('points').scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});return;
+      const planned = !filters.planned;
+      Object.assign(filters,clearDashboardDetailFilters(filters),{planned});
+      syncFilterControls();page=1;render();find('points').scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});return;
     }
     if (action?.startsWith('status-')) {filters.status=action.slice(7);container.querySelector('[data-filter="status"]').value=filters.status;page=1;render();return;}
     if (action === 'refresh' && onRefresh) {
@@ -250,7 +271,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
 
   listen(container,'click',event => {
     const action=event.target.closest('[data-action]');
-    if (action && container.contains(action) && !action.disabled) perform(action.dataset.action);
+    if (action && container.contains(action) && !action.disabled) perform(action.dataset.action,action.dataset);
   });
   listen(container,'input',event => {
     const control=event.target.closest('[data-filter]');
@@ -265,6 +286,11 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
   function setSnapshot(next) {
     metadata=next || {};
     data=next?.tracking || (next?.points ? next : null);
+    if (!data) {
+      Object.assign(filters,DEFAULT_DASHBOARD_FILTERS);
+      orders.auditors={...DASHBOARD_SORT_DEFAULTS.auditors};orders.points={...DASHBOARD_SORT_DEFAULTS.points};
+      syncFilterControls();currentPoints=[];currentMonthlyPoints=[];currentAuditors=[];
+    }
     page=1;error='';
     if (metadata.lastPlanningAvailable == null) metadata={...metadata,lastPlanningAvailable:Boolean(metadata.planPeriod || data?.planPeriod || data?.points?.some(point => point.plannedCurrentWeek))};
     renderOptions();render();
@@ -274,6 +300,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     setSnapshot,
     setState(state={}) {if('loading' in state)loading=Boolean(state.loading);if('error' in state)error=state.error||'';render();},
     getFilters() {return {...filters};},
+    getSort() {return {auditors:{...orders.auditors},points:{...orders.points}};},
     destroy() {controller.abort();container.replaceChildren();container.classList.remove('tracking-dashboard');}
   };
 }

@@ -1,7 +1,7 @@
 // Monthly progress and productivity share normalized inputs with the selector.
 // A SOVI measurement is eight distinct completed studies within one field week.
 import {normalize,id,isoDate,monday,frequency,SelectionError,OSA,REPLICAS,SOVI,FACING,CV,MONTHLY,DEFAULT_ALIASES} from './engine.js';
-import {operationalMonthStart,suggestPeriod} from './period.js';
+import {resolveOperationalPeriod,suggestPeriod,validateMonthRange} from './period.js';
 
 export const TRACKING_ALIASES={...DEFAULT_ALIASES,
   'OSA VINOS EMBONOR':'OSA VINOS 2',
@@ -29,10 +29,12 @@ const statusGroup=status=>normalize(status)==='TERMINADO'?'completed':/^RECHAZ/.
 // Persist only the active operational month. Undated rows stay available for
 // unresolved-state and data-quality checks; they never create a dated visit.
 export function reportForPeriod(report,period){
-  const start=period?.operationalStart;
+  let range;
+  if(period?.monthRange){try{range=validateMonthRange(period.month,period.monthRange);}catch(error){throw new SelectionError(error.message);}}
+  const start=range?.start||period?.operationalStart;
   const validDate=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&isoDate(value)===value;
   if(!validDate(start))throw new SelectionError('El período del export necesita un inicio operativo válido.');
-  const end=period.operationalEnd??([4,5].includes(period.weeks)?plusDays(start,period.weeks*7-1):null);
+  const end=range?.end||(period.operationalEnd??([4,5].includes(period.weeks)?plusDays(start,period.weeks*7-1):null));
   if(!validDate(end)||end<start)throw new SelectionError('El período del export necesita un fin operativo válido, posterior o igual al inicio.');
   if(!Array.isArray(report))throw new SelectionError('El export debe ser una lista de encuestas.');
   return report.filter(row=>{const day=isoDate(row.day);return !day||day>=start&&day<=end;});
@@ -80,9 +82,11 @@ function periodFor(planning,options){
   const monthMonday=monday(month+'-01');
   const start=rawStart||plusDays(monthMonday,(week-1)*7),end=isoDate(options.end||options.dateOverride?.end||planning.studies?.[0]?.end)||plusDays(start,5);
   if(end<start)throw new SelectionError('El inicio del seguimiento debe ser anterior al fin.');
-  const operationalStart=operationalMonthStart(start,week),secondHalfStart=plusDays(operationalStart,14),operationalEnd=plusDays(operationalStart,weeks*7-1);
+  let boundaries;
+  try{boundaries=resolveOperationalPeriod({month,start,end,week,weeks,monthRange:options.monthRange});}catch(error){throw new SelectionError(error.message);}
+  const {operationalEnd}=boundaries;
   const asOf=isoDate(options.asOf)||operationalEnd;
-  return {month,week,weeks,start,end,operationalStart,secondHalfStart,operationalEnd,asOf:asOf<operationalEnd?asOf:operationalEnd};
+  return {month,week,weeks,start,end,...boundaries,asOf:asOf<operationalEnd?asOf:operationalEnd};
 }
 function targets(study,f,weeks){
   if(study==='SOVI EMBONOR')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Una medición completa de 8 estudios por quincena'};
