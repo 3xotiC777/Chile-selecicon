@@ -22,9 +22,9 @@ self.onmessage=async event=>{
     if(task==='select'){
       const progress=message=>self.postMessage({progress:message});
       progress('Leyendo la hoja RETAIL…');const planning=parsePlanning(data.planning);
-      progress('Contando visitas TERMINADO por estudio y semana…');const report=data.report?parseReport(data.report):[];
+      progress('Contando visitas TERMINADO por estudio y semana…');const report=data.report?parseReport(data.report):data.reportRows||[];
       progress('Seleccionando OSA, SOVI, Facing y los demás estudios…');
-      const result=select({planning,report,universe:data.universe,hasReport:!!data.report,options:data.options});
+      const result=select({planning,report,universe:data.universe,hasReport:!!data.report||Array.isArray(data.reportRows),options:data.options});
       progress('Preparando los CSV y el ZIP…');
       const files=Object.fromEntries(result.files.map(f=>[f.name,strToU8(csvRows(f.rows))]));
       const zip=zipSync(files,{level:6});

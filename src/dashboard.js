@@ -97,7 +97,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
       </section>
       <section class="tracking-section" aria-labelledby="${prefix}-auditors-title">
         <div class="tracking-section-heading"><div><p class="eyebrow">TRABAJO REGISTRADO</p><h2 id="${prefix}-auditors-title">Productividad por auditor</h2></div><button type="button" class="text-button" data-action="export-productivity">Descargar productividad</button></div>
-        <p class="tracking-small">Encuestas por día usa los días con actividad registrada. La duración promedio considera las encuestas con un tiempo válido. Los VACIO sin fecha se muestran en los puntos y quedan fuera de la productividad. Aquí aplican cliente, estudio y auditor del export. La región y los filtros del detalle no cambian esta tabla. Pulsa un encabezado para ordenar.</p>
+        <p class="tracking-small">Encuestas por día usa los días con actividad registrada. La duración promedio considera las encuestas con un tiempo válido. Los VACIO sin fecha o todavía sin inicio en SQL se muestran en los puntos y quedan fuera de la productividad. Aquí aplican cliente, estudio y auditor del export. La región y los filtros del detalle no cambian esta tabla. Pulsa un encabezado para ordenar.</p>
         <div data-dashboard="auditors" class="tracking-table-wrap tracking-auditors"></div>
       </section>
       <section class="tracking-section" aria-labelledby="${prefix}-points-title">

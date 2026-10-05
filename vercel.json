@@ -2,6 +2,8 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {"api/sync-report.js": {"maxDuration": 180}},
+  "crons": [{"path": "/api/sync-report", "schedule": "0 11 * * *"}],
   "headers": [
     {"source": "/(.*)", "headers": [
       {"key": "X-Content-Type-Options", "value": "nosniff"},

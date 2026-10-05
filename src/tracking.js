@@ -174,6 +174,11 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
     if(!canonical){quality.unknownStudies++;unknownNames.add(normalize(row.study));}
     const source=canonical?master.get(key(canonical,folio)):null;
     if(!source)quality.unplannedPoints++;
+    // DIA in SQL can be the dispatch date of an unstarted survey. Keep VACIO
+    // visible at the point, without inventing a worked day or productivity.
+    if(row.scheduledOnly===true&&group==='empty'){
+      metricFor(study,folio).empty++;continue;
+    }
     const actualName=String(row.auditorName||row.auditor||source?.auditorName||'Sin auditor').trim(),matched=namesToAuditors.get(normalize(actualName));
     const numericActual=id(row.auditor??row.auditorName);
     const actualCode=id(row.auditorCode)||(/^\d+$/.test(numericActual)?numericActual:matched?.size===1?[...matched][0]:normalize(actualName)===normalize(source?.auditorName)?source?.auditor:null)||`nombre:${normalize(actualName)}`;
