@@ -45,7 +45,8 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
     const previous=status.last_success_at?`Última sincronización: ${date(status.last_success_at)} · ${n(status.row_count)} registros.`:'Aún no se ha completado una sincronización para este mes.';
     const staleRun=status.status==='running'&&Date.now()-Date.parse(status.started_at)>300000;
     const state=status.status==='failed'||staleRun?' No se pudo completar la última actualización; se conserva el avance anterior.':status.status==='running'?' Sincronización en curso…':'';
-    banner.textContent=`SQL Server · ${previous}${state}`;banner.hidden=false;
+    const manual=workspace.metadata.reportSource==='manual'?'Avance actual: carga manual. ':'';
+    banner.textContent=`${manual}SQL Server · ${previous}${state}`;banner.hidden=false;
     $('sql-sync-current').textContent=`${previous}${state} Rango: ${status.range_start} al ${status.range_end}.`;
   }
   async function syncAccess(){
@@ -116,7 +117,9 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
     const metadata={...draft.metadata,options:{...draft.options,...selection.period,aliases:{...TRACKING_ALIASES,...draft.options.aliases}},selectionOrigin:'Guardada por el administrador'};
     if(changed&&!confirm(`Guardar ${month} reemplazará el seguimiento y los ZIP de ${workspace.month}. Ya revisaste la nueva selección. ¿Iniciar el mes ${month}?`))throw new Error('Se canceló el cambio de mes. La selección sigue disponible para descargar.');
     await cloud.saveWorkspace({month,planning,universe:draft.universe,report:reportForPeriod(draft.report,selection.period),selection,metadata,revision:workspace?.revision||0});
-    await refresh({force:true});view('dashboard');
+    await refresh({force:true});
+    if(changed||!draft.metadata.reportName)await synchronize();
+    view('dashboard');
   }
   function authForm(){
     $('auth-view').innerHTML=`<div class="login-copy"><p class="eyebrow">OPERACIÓN CHILE</p><h1>${setupToken?'Activa tu administrador':'Planeación y avance, en un solo lugar.'}</h1><p>${setupToken?'Elige el correo y la contraseña de la primera cuenta. Este enlace se usa una sola vez.':'Consulta las visitas del mes, los pendientes y la última planeación compartida.'}</p><div class="login-feature"><strong>Avance real</strong><span>Solo TERMINADO cumple la meta. Vacíos y rechazos quedan visibles.</span></div><div class="login-feature"><strong>Acceso por usuario</strong><span>Campo consulta y descarga. Administración prepara y actualiza.</span></div></div><form id="login-form" class="login-form"><h2>${setupToken?'Crear administrador':'Iniciar sesión'}</h2>${setupToken?'<label>Nombre<input id="login-name" autocomplete="name" required maxlength="120" /></label>':''}<label>Correo<input id="login-email" type="email" autocomplete="username" required /></label><label>Contraseña<input id="login-password" type="password" autocomplete="${setupToken?'new-password':'current-password'}" required ${setupToken?'minlength="12"':''} maxlength="128" /></label>${setupToken?'<label>Confirmar contraseña<input id="login-confirm" type="password" autocomplete="new-password" required minlength="12" /></label><p class="note">Mínimo 12 caracteres. Después podrás crear las cuentas del equipo.</p>':''}<button id="login-submit" class="primary" type="submit">${setupToken?'Crear administrador':'Entrar'}</button><p id="auth-status" role="status" class="portal-message"></p><p class="note">Las cuentas las administra el responsable de Chile.</p></form>`;
