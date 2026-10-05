@@ -29,6 +29,35 @@ test('operational October includes September 28 and excludes previous September 
   const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1')],report:[visit('1',OSA,'2026-09-28'),visit('1',OSA,'2026-09-21')] ,options});
   assert.equal(r.period.operationalStart,'2026-09-28');assert.equal(r.period.secondHalfStart,'2026-10-12');assert.equal(point(r,OSA).validVisits,1);assert.equal(r.quality.outsidePeriod,1);
 });
+test('confirmed monthly tracking uses inclusive range extremes and caps as-of at the end',()=>{
+  const monthRange={start:'2026-09-28',end:'2026-10-31'};
+  const report=['2026-09-27','2026-09-28','2026-10-31','2026-11-01'].map(day=>visit('1',FACING,day));
+  const r=buildTracking({planning:planning([{folio:'1',study:FACING}]),report,options:{...options,monthRange,asOf:'2026-11-10'}});
+  assert.deepEqual(r.period.monthRange,monthRange);assert.equal(r.period.operationalStart,monthRange.start);assert.equal(r.period.operationalEnd,monthRange.end);assert.equal(r.period.asOf,'2026-10-31');
+  assert.equal(point(r,FACING).validVisits,2);assert.equal(r.quality.outsidePeriod,2);assert.equal(r.summary.completedSurveys,2);
+  const earlier=buildTracking({planning:planning([{folio:'1',study:FACING}]),report,options:{...options,monthRange,asOf:'2026-10-10'}});
+  assert.equal(point(earlier,FACING).validVisits,1);assert.equal(earlier.period.asOf,'2026-10-10');
+});
+test('an edited monthly range changes tracking counts and preserves Monday-based halves',()=>{
+  const monthRange={start:'2026-10-01',end:'2026-10-31'};
+  const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1','QUINCENALES')],report:['2026-09-28','2026-10-01','2026-10-11','2026-10-12'].map(day=>visit('1',OSA,day)),options:{...options,monthRange}});
+  const p=point(r,OSA);assert.equal(p.validVisits,3);assert.equal(p.visitsFirstHalf,2);assert.equal(p.visitsSecondHalf,1);assert.equal(p.fulfilledVisits,2);
+  assert.equal(r.period.secondHalfStart,'2026-10-12');assert.equal(r.quality.outsidePeriod,1);
+});
+test('tracking blocks a weekly load outside its confirmed month range',()=>{
+  assert.throws(()=>buildTracking({planning:planning([{folio:'1',study:FACING}]),options:{...options,monthRange:{start:'2026-10-06',end:'2026-10-31'}}}),/fuera del rango operativo confirmado/);
+});
+test('report retention gives the confirmed month range priority over legacy derived boundaries',()=>{
+  const report=['2026-09-27','2026-09-28','2026-10-31','2026-11-01'].map(day=>visit('1',FACING,day));
+  const period={month:'2026-10',monthRange:{start:'2026-09-28',end:'2026-10-31'},operationalStart:'2026-10-01',operationalEnd:'2026-11-01',weeks:5};
+  assert.deepEqual(reportForPeriod(report,period).map(row=>row.day),['2026-09-28','2026-10-31']);
+  assert.throws(()=>reportForPeriod(report,{...period,monthRange:{start:'2026-09-31',end:'2026-10-31'}}),/fechas válidas/);
+});
+test('SOVI components excluded by the month range cannot complete a measurement',()=>{
+  const report=SOVI.map((study,i)=>visit('1',study,i<4?'2026-09-29':'2026-10-01'));
+  const r=buildTracking({planning:planning(SOVI.map(study=>({folio:'1',study}))),report,options:{...options,monthRange:{start:'2026-10-01',end:'2026-10-31'}}});
+  assert.equal(point(r,'SOVI EMBONOR').validVisits,0);assert.equal(point(r,'SOVI EMBONOR').partialSovi[0].completedStudies,4);assert.equal(r.quality.outsidePeriod,4);
+});
 test('fixed OSA needs separate completed weeks, not repeated surveys in one week',()=>{
   const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1')],report:[visit('1',OSA,'2026-09-28'),visit('1',OSA,'2026-09-29'),visit('1',OSA,'2026-10-05')],options});
   const p=point(r,OSA);assert.equal(p.target,5);assert.equal(p.validVisits,3);assert.equal(p.fulfilledVisits,2);assert.equal(p.remaining,3);assert.equal(p.progress,40);assert.equal(p.excessVisits,1);

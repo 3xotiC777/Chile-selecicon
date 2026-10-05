@@ -67,6 +67,33 @@ test('October history begins on September 28 and merges SOVI components across t
   assert.equal(h.count(OSA,'1'),1);assert.equal(h.count(OSA,'2'),0);assert.equal(h.count(OSA,'3'),0);
   assert.equal(h.soviCount('1'),1);assert.equal(h.soviHalfCount('1',1),1);assert.equal(h.stats.valid,9);assert.equal(h.stats.ignoredPeriod,2);
 });
+test('a confirmed October range includes September 28 and is preserved in the selection period',()=>{
+  const f=fixture();Object.assign(f.options,{month:'2026-10',week:2,dateOverride:{start:'2026-10-05',end:'2026-10-10'},monthRange:{start:'2026-09-28',end:'2026-10-31'}});
+  f.report=[visit(FACING,1,'2026-09-28'),visit(FACING,2,'2026-09-27'),visit(FACING,3,'2026-10-05')];
+  const r=select(f);
+  assert.deepEqual(r.period.monthRange,f.options.monthRange);assert.equal(r.period.operationalStart,'2026-09-28');assert.equal(r.period.operationalEnd,'2026-10-31');
+  assert.equal(r.decisions.find(d=>d.study===FACING&&d.folio==='1').visits,1);
+  for(const folio of ['2','3'])assert.equal(r.decisions.find(d=>d.study===FACING&&d.folio===folio).visits,0);
+  assert.equal(r.history.valid,1);
+});
+test('an edited range changes the visit cut and SOVI never imports components outside it',()=>{
+  const monthRange={start:'2026-10-01',end:'2026-10-31'};
+  const report=[visit(OSA,1,'2026-09-28'),visit(OSA,2,'2026-10-01'),...SOVI.map((study,i)=>visit(study,1,i<4?'2026-09-29':'2026-10-01')),...SOVI.map(study=>visit(study,2,'2026-10-03'))];
+  const h=buildHistory(report,{month:'2026-10',start:'2026-10-05',end:'2026-10-10',week:2,weeks:5,aliases:DEFAULT_ALIASES,monthRange});
+  assert.equal(h.count(OSA,'1'),0);assert.equal(h.count(OSA,'2'),1);
+  assert.equal(h.soviCount('1'),0);assert.equal(h.soviCount('2'),1);assert.equal(h.soviHalfCount('2',1),1);
+  assert.equal(h.secondHalfStart,'2026-10-12');assert.equal(h.incomplete.get('1'),1);
+});
+test('selection blocks a weekly load outside the confirmed range instead of silently re-inferring it',()=>{
+  const f=fixture();Object.assign(f.options,{month:'2026-10',week:5,dateOverride:{start:'2026-10-26',end:'2026-10-31'},monthRange:{start:'2026-09-28',end:'2026-10-30'}});
+  assert.throws(()=>select(f),/fuera del rango operativo confirmado/);
+  f.options.monthRange={start:'2026-11-01',end:'2026-11-30'};assert.throws(()=>select(f),/mes elegido/);
+});
+test('explicit ranges retain operational Monday halves even when their start is not a Monday',()=>{
+  const h=buildHistory([visit(OSA,1,'2026-10-11'),visit(OSA,2,'2026-10-12')],{month:'2026-10',start:'2026-10-19',end:'2026-10-24',week:3,weeks:5,aliases:DEFAULT_ALIASES,monthRange:{start:'2026-10-01',end:'2026-10-31'}});
+  assert.equal(h.operationalStart,'2026-10-01');assert.equal(h.secondHalfStart,'2026-10-12');
+  assert.equal(h.halfCount(OSA,'1',1),1);assert.equal(h.halfCount(OSA,'2',2),1);
+});
 test('October week 2 excludes completed September visits from OSA quincenal, SOVI, CV and monthly studies',()=>{
   const f=fixture();Object.assign(f.options,{month:'2026-10',week:2,dateOverride:{start:'2026-10-05',end:'2026-10-10'}});
   f.universe.find(r=>r.client==='EMBONOR'&&r.folio==='1').frequency='QUINCENALES';

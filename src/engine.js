@@ -1,5 +1,5 @@
 // Pure selection rules. Dates are ISO calendar strings; identifiers remain strings.
-import { suggestPeriod,operationalMonthStart } from './period.js';
+import { suggestPeriod,resolveOperationalPeriod } from './period.js';
 import { chooseBalanced,summarizeWorkload } from './workload.js';
 export const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toUpperCase();
 export const id = value => String(value ?? '').trim().replace(/\.0+$/, '');
@@ -56,12 +56,11 @@ export function frequency(value) {
   if(['2','3','4'].includes(s))return Number(s);
   return null;
 }
-export function buildHistory(report, {month, start, aliases, week=suggestPeriod(start).week}) {
+export function buildHistory(report, {month,start,end,aliases,week=suggestPeriod(start).week,weeks=suggestPeriod(start).weeks,monthRange}) {
   // Anchor the operational halves to the planning week, not calendar day 15.
-  const operationalStart=operationalMonthStart(start,week);
-  const boundary=new Date(operationalStart+'T00:00:00Z');
-  boundary.setUTCDate(boundary.getUTCDate()+14);
-  const secondHalfStart=boundary.toISOString().slice(0,10);
+  let boundaries;
+  try{boundaries=resolveOperationalPeriod({month,start,end,week,weeks,monthRange});}catch(error){fail(error.message);}
+  const {operationalStart,operationalEnd,secondHalfStart}=boundaries;
   const halfOf=day=>monday(day)<secondHalfStart?1:2;
   const lookup=new Map();
   for(const [study,alias] of Object.entries(aliases)){
@@ -78,7 +77,7 @@ export function buildHistory(report, {month, start, aliases, week=suggestPeriod(
     if(normalize(r.status)!=='TERMINADO'){stats.ignoredStatus++;continue;}
     const day=isoDate(r.day);
     if(!day){problems.push(`Visita ${r.visit||'(sin ID)'}, folio ${r.folio}: TERMINADO sin DIA válido.`);continue;}
-    if(day<operationalStart||day>=start){stats.ignoredPeriod++;continue;}
+    if(day<operationalStart||day>=start||monthRange&&day>operationalEnd){stats.ignoredPeriod++;continue;}
     const study=lookup.get(normalize(r.study));
     if(!study){stats.unrelated++;continue;}
     if(!r.folio){problems.push(`Visita ${r.visit||'(sin ID)'}: falta FOLIO.`);continue;}
@@ -109,7 +108,7 @@ export function buildHistory(report, {month, start, aliases, week=suggestPeriod(
     }
     sovi.set(folio,complete);if(partial)incomplete.set(folio,partial);
   }
-  return {stats,seenNames,incomplete,secondHalfStart,operationalStart,
+  return {stats,seenNames,incomplete,...boundaries,
     count:(study,folio)=>totals.get(JSON.stringify([study,folio]))||0,
     halfCount:(study,folio,half)=>halfTotals.get(JSON.stringify([study,folio,half]))||0,
     soviCount:folio=>sovi.get(folio)||0,
@@ -173,9 +172,9 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(starts.length!==1||ends.length!==1)fail('Los estudios deben compartir el mismo período semanal en RETAIL.',planning.studies.map(s=>`${s.name}: ${s.start} a ${s.end}`));
   const start=starts[0],end=ends[0];
   if(!isoDate(start)||!isoDate(end)||end<start)fail('Revisa las fechas de inicio y fin en RETAIL.');
-  if(start.slice(0,7)!==month&&end.slice(0,7)!==month)fail(`El mes elegido (${month}) no coincide con las fechas de carga (${start} a ${end}). Corrige las filas 2 y 3 de RETAIL o activa «Usar otras fechas de carga» e indica la semana correcta.`);
+  if(!options.monthRange&&start.slice(0,7)!==month&&end.slice(0,7)!==month)fail(`El mes elegido (${month}) no coincide con las fechas de carga (${start} a ${end}). Corrige las filas 2 y 3 de RETAIL o activa «Usar otras fechas de carga» e indica la semana correcta.`);
   const aliases={...DEFAULT_ALIASES,...CENCOSUD_INTERNAL_ALIASES,...options.aliases};
-  const history=buildHistory(report,{month,start,aliases,week});
+  const history=buildHistory(report,{month,start,end,aliases,week,weeks,monthRange:options.monthRange});
   const half=week<=2?1:2;
   const warnings=[...(planning.warnings||[])];
   if(dateWarning)warnings.push(dateWarning);
@@ -318,7 +317,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(soviPresent.length)files.push({name:'SOVI EMBONOR.csv',rows:SOVI.flatMap(s=>rows(s).filter(r=>sovi.has(r.folio)))});
   const selectedRows=files.flatMap(f=>f.rows);
   const workload=summarizeWorkload(planning.rows,selectedRows);
-  return {files,decisions,warnings,history:history.stats,soviAuditors,workload,period:{month,week,weeks,holidays,start,end,half,operationalStart:history.operationalStart,secondHalfStart:history.secondHalfStart},metrics:{points:new Set(selectedRows.map(r=>r.folio)).size,rows:selectedRows.length,files:files.length,auditors:new Set(selectedRows.map(r=>r.auditor)).size,osa:osa.size,sovi:sovi.size,facingExceptions,fixedTotal:fixed.length,fixedTarget}};
+  return {files,decisions,warnings,history:history.stats,soviAuditors,workload,period:{month,week,weeks,holidays,start,end,half,operationalStart:history.operationalStart,operationalEnd:history.operationalEnd,secondHalfStart:history.secondHalfStart,...(history.monthRange?{monthRange:history.monthRange}:{})},metrics:{points:new Set(selectedRows.map(r=>r.folio)).size,rows:selectedRows.length,files:files.length,auditors:new Set(selectedRows.map(r=>r.auditor)).size,osa:osa.size,sovi:sovi.size,facingExceptions,fixedTotal:fixed.length,fixedTarget}};
 }
 function csvCell(value){const s=String(value??'');return /[;"\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
 export function csvRows(rows){return rows.map(r=>[r.folio,r.auditor,r.studyId,csvDate(r.start),csvDate(r.start),csvDate(r.end)].map(csvCell).join(';')).join('\r\n')+(rows.length?'\r\n':'');}
