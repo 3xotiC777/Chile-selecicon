@@ -85,6 +85,10 @@ Este equilibrio mejora la elección cuando existe margen dentro de las reglas. N
 
 ## Formatos
 
+**Descargar avance · Excel** genera `AVANCE_CHILE_AAAA-MM.xlsx` con una hoja por cliente y una fila por folio y estudio, respetando los filtros activos del detalle (sin limitarse a la página visible). Incluye auditor, coordinador, local, dirección, comuna, región y frecuencia cuando constan en la base. Cada semana del rango operativo tiene una columna con sus fechas y estado: TERMINADO, RECHAZO, VACIO, PARCIAL SOVI o los demás estados del export. Si no hay registros fechados, muestra SIN REGISTROS, sin inferir que el punto no fue cargado. Las encuestas sin fecha se contabilizan aparte; nunca se les inventa una semana.
+
+Una visita TERMINADO prevalece sobre intentos fallidos de la misma semana; SOVI exige sus ocho componentes distintos. Las columnas finales muestran la meta mensual, cumplidas, pendientes y porcentaje según las reglas de frecuencia del dashboard: dos semanas terminadas en una misma quincena no cumplen dos cuotas quincenales. El archivo tiene filtros, encabezados y las primeras dos columnas inmovilizados, y colores por estado. Productividad conserva su descarga CSV.
+
 - Planning: `RETAIL`, folios B desde fila 8, auditor P, nombre Q, códigos de estudio fila 6, nombres fila 7, fecha inicial fila 2 y final fila 3. Estudios hasta la columna TOTAL, celdas con valor 1. La lectura termina en el primer folio vacío o cero, como la macro original.
 - Universo: `FOLIO CADEM` (o `FOLIO`), `FRECUENCIA`, `CLIENTE`. El cruce incluye cliente y folio.
 - Export: `FOLIO`, `ESTUDIO`, `ESTADO`, `DIA`; `VISITA` se usa para deduplicar si existe. Se aceptan `.xlsx`, `.xlsm` y `.csv`.

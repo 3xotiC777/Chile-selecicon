@@ -16,7 +16,7 @@ function readWorkbook(bytes,onlySheet) {
 const value=(sheet,r,c)=>sheet[XLSX.utils.encode_cell({r,c})]?.v;
 const textValue=(sheet,r,c)=>c<0?'':String(value(sheet,r,c)??'').trim();
 function metadata(sheet,r,headers){
-  const fields={client:['CLIENTE'],address:['DIRECCION','DIRECCIÓN'],region:['REGION','REGIÓN'],commune:['COMUNA'],chain:['CADENA'],location:['NOMBRE LOCAL','NOMBRE DEL LOCAL','NOMBRE PDV','NOMBRE'],coordinator:['COORDINADOR'],channel:['CANAL']},result={};
+  const fields={client:['CLIENTE'],address:['DIRECCION','DIRECCIÓN'],region:['REGION','REGIÓN'],commune:['COMUNA'],chain:['CADENA'],location:['NOMBRE LOCAL','NOMBRE DEL LOCAL','NOMBRE PDV','NOMBRE'],coordinator:['COORDINADOR'],channel:['CANAL'],office:['OFICINA'],measurementDay:['DIA MEDICION','DIA VISITA','DIA DE VISITA']},result={};
   for(const [field,names] of Object.entries(fields)){const c=headers.findIndex(h=>names.some(n=>normalize(n)===h)),v=textValue(sheet,r,c);if(v)result[field]=v;}
   return result;
 }

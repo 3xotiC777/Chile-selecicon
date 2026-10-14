@@ -1,5 +1,5 @@
 import './dashboard.css';
-import { summarizeTracking, trackingCsv, productivityCsv } from './tracking.js';
+import { summarizeTracking, productivityCsv } from './tracking.js';
 import { DEFAULT_DASHBOARD_FILTERS, dashboardScopes, clearDashboardDetailFilters } from './dashboard-filters.js';
 import { DASHBOARD_SORT_DEFAULTS, DASHBOARD_SORT_COLUMNS, sortDashboardRows, pointStatusLabel } from './dashboard-sort.js';
 import {summarizeWeeklyProgress} from './weekly-progress.js';
@@ -31,8 +31,8 @@ function monthLabel(month) {
   return new Intl.DateTimeFormat('es-CL', {month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(`${month}-01T12:00:00Z`));
 }
 
-function download(content, filename) {
-  const url = URL.createObjectURL(new Blob([content], {type:'text/csv;charset=utf-8'}));
+function download(content, filename, type='text/csv;charset=utf-8') {
+  const url = URL.createObjectURL(new Blob([content], {type}));
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
@@ -64,7 +64,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
       <div><p class="eyebrow">SEGUIMIENTO COMPARTIDO</p><h1>Control de campo</h1><p data-dashboard="period" class="tracking-period">Seguimiento mensual</p></div>
       <div class="tracking-actions">
         <button type="button" class="tracking-button tracking-button-light" data-action="refresh">Actualizar vista <span aria-hidden="true">↻</span></button>
-        <button type="button" class="tracking-button tracking-button-light" data-action="export-progress">Descargar avance <span aria-hidden="true">↓</span></button>
+        <button type="button" class="tracking-button tracking-button-light" data-action="export-progress">Descargar avance · Excel <span aria-hidden="true">↓</span></button>
         <button type="button" class="tracking-button tracking-button-primary" data-action="download-plan">Última planeación · ZIP <span aria-hidden="true">↓</span></button>
       </div>
     </div>
@@ -287,10 +287,17 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
       if (!data || exporting) return;
       const kind=action==='export-progress'?'progress':'productivity';
       const rows=kind==='progress'?currentPoints:currentAuditors;
-      const filename=`${kind==='progress'?'AVANCE':'PRODUCTIVIDAD'}_CHILE_${data.period?.month || 'MES'}.csv`;
-      const content=kind==='progress'?trackingCsv(rows):productivityCsv(rows);
+      const period=data.period,exportFilters={...filters};
+      const filename=`${kind==='progress'?'AVANCE':'PRODUCTIVIDAD'}_CHILE_${period?.month || 'MES'}.${kind==='progress'?'xlsx':'csv'}`;
       exporting=true;error='';renderMessage();
-      try {if(onExport)await onExport({kind,rows,filename,content});else download(content,filename);}
+      try {
+        let content,type='text/csv;charset=utf-8';
+        if(kind==='progress'){
+          const {progressWorkbook,PROGRESS_MIME}=await import('./tracking-export.js');
+          content=await progressWorkbook(rows,period,{filters:exportFilters});type=PROGRESS_MIME;
+        }else content=productivityCsv(rows);
+        if(onExport)await onExport({kind,rows,filename,content,type});else download(content,filename,type);
+      }
       catch(failure) {error=failure.message || 'No se pudo descargar el avance.';}
       finally {exporting=false;renderMessage();}
     }

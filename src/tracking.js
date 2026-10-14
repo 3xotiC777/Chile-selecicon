@@ -148,7 +148,15 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
   const assignments=options.assignments||[];const planned=new Map();
   for(const row of assignments){for(const study of normalize(row.study)==='CENCOSUD'?['PRECIOS CENCOSUD','FOTOGRAFIAS CENCOSUD']:[consolidatedStudy(normalize(row.study))]){const k=key(study,id(row.folio));if(!planned.has(k))planned.set(k,row);}}
   const quality={rows:report.length,duplicates:0,invalidDates:0,invalidCompletedDates:0,undatedEmpty:0,undatedRejected:0,outsidePeriod:0,unknownStudies:0,unplannedPoints:0,invalidDurations:0,missingFrequencies:0,ineligibleSovi:0,incompleteSovi:0,unknownStudyNames:[]};
-  const aggregates=new Map(),soviWeeks=new Map(),dailyMap=new Map(),seen=new Set(),unknownNames=new Set();
+  const aggregates=new Map(),soviWeeks=new Map(),dailyMap=new Map(),seen=new Set(),unknownNames=new Set(),weeklyStates=new Map();
+  const recordWeeklyState=(study,folio,day,group,status)=>{
+    const k=key(study,folio),weekStart=monday(day);
+    if(!weeklyStates.has(k))weeklyStates.set(k,new Map());
+    const weeks=weeklyStates.get(k);
+    if(!weeks.has(weekStart))weeks.set(weekStart,{weekStart,completed:0,empty:0,rejected:0,other:0,otherStatuses:new Set()});
+    const entry=weeks.get(weekStart);entry[group]++;
+    if(group==='other')entry.otherStatuses.add(normalize(status));
+  };
   const metricFor=(study,folio)=>{const k=key(study,folio);if(!aggregates.has(k))aggregates.set(k,{valid:0,empty:0,rejected:0,other:0,undatedEmpty:0,undatedRejected:0,attempts:0,firstHalf:0,secondHalf:0,weeks:new Set(),completedByWeek:new Map(),lastVisit:null,currentWeekValid:0});return aggregates.get(k);};
   let lastReportDay=null;
   for(const row of report){
@@ -174,6 +182,9 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
     if(!canonical){quality.unknownStudies++;unknownNames.add(normalize(row.study));}
     const source=canonical?master.get(key(canonical,folio)):null;
     if(!source)quality.unplannedPoints++;
+    // A dated VACIO can describe a dispatch, not field work. It is still a
+    // weekly status; undated rows above never acquire an invented week.
+    recordWeeklyState(study,folio,day,group,row.status);
     // DIA in SQL can be the dispatch date of an unstarted survey. Keep VACIO
     // visible at the point, without inventing a worked day or productivity.
     if(row.scheduledOnly===true&&group==='empty'){
@@ -223,7 +234,8 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
     const fulfilledByWeek=fulfilledWeeks(completedByWeek,goal,period);
     const remaining=goal.target===null?null:Math.max(0,goal.target-fulfilledVisits),complete=goal.target!==null&&remaining===0,plan=planned.get(pKey);
     const status=complete?'complete':fulfilledVisits>0?'partial':metric.rejected>0?'rejected':metric.empty>0?'empty':'pending';
-    points.push({folio:row.folio,client,study,studyId:study==='SOVI EMBONOR'?null:row.studyId||null,auditor:row.auditor,auditorName:row.auditorName,coordinator:row.coordinator||'',location:row.location||row.address||'',address:row.address||'',region:row.region||'',commune:row.commune||'',chain:row.chain||'',...goal,validVisits,fulfilledVisits,fulfilledByWeek,remaining,progress:percent(fulfilledVisits,goal.target),visitsFirstHalf,visitsSecondHalf,weeklyVisits,empty:metric.empty,rejected:metric.rejected,other:metric.other,undatedEmpty:metric.undatedEmpty||0,undatedRejected:metric.undatedRejected||0,attempts:metric.attempts,lastVisit:metric.lastVisit,plannedCurrentWeek:!!plan,plannedWeekStart:plan?.start||null,plannedWeekEnd:plan?.end||null,currentWeekCompleted,plannedPending:!!plan&&!currentWeekCompleted,incompleteWeeks,partialSovi,complete,status,excessVisits:Math.max(0,validVisits-fulfilledVisits)});
+    const weekStates=[...(weeklyStates.get(pKey)?.values()||[])].sort((a,b)=>sorted(a.weekStart,b.weekStart)).map(entry=>({...entry,otherStatuses:[...entry.otherStatuses].sort(sorted),completedVisits:completedByWeek.get(entry.weekStart)||0,completedStudies:study==='SOVI EMBONOR'?(soviWeeks.get(row.folio)?.get(entry.weekStart)?.size||0):null}));
+    points.push({folio:row.folio,client,study,studyId:study==='SOVI EMBONOR'?null:row.studyId||null,auditor:row.auditor,auditorName:row.auditorName,coordinator:row.coordinator||'',office:row.office||'',measurementDay:row.measurementDay||'',location:row.location||row.address||'',address:row.address||'',region:row.region||'',commune:row.commune||'',chain:row.chain||'',...goal,weekStates,validVisits,fulfilledVisits,fulfilledByWeek,remaining,progress:percent(fulfilledVisits,goal.target),visitsFirstHalf,visitsSecondHalf,weeklyVisits,empty:metric.empty,rejected:metric.rejected,other:metric.other,undatedEmpty:metric.undatedEmpty||0,undatedRejected:metric.undatedRejected||0,attempts:metric.attempts,lastVisit:metric.lastVisit,plannedCurrentWeek:!!plan,plannedWeekStart:plan?.start||null,plannedWeekEnd:plan?.end||null,currentWeekCompleted,plannedPending:!!plan&&!currentWeekCompleted,incompleteWeeks,partialSovi,complete,status,excessVisits:Math.max(0,validVisits-fulfilledVisits)});
   }
   points.sort((a,b)=>sorted(a.client,b.client)||sorted(a.study,b.study)||sorted(a.auditorName,b.auditorName)||sorted(a.folio,b.folio));
   const daily=[...dailyMap.values()].map(d=>({...d,minutes:Math.round(d.minutes*10000)/10000})).sort((a,b)=>sorted(a.day,b.day)||sorted(a.auditor,b.auditor)||sorted(a.study,b.study));
