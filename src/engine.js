@@ -1,6 +1,7 @@
 // Pure selection rules. Dates are ISO calendar strings; identifiers remain strings.
 import { suggestPeriod,resolveOperationalPeriod } from './period.js';
 import { chooseBalanced,summarizeWorkload } from './workload.js';
+import {WEEKLY_MONTHLY_TARGET,creditedWeeks} from './visit-goals.js';
 export const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toUpperCase();
 export const id = value => String(value ?? '').trim().replace(/\.0+$/, '');
 export const OSA = 'OSA BEBESTIBLES';
@@ -15,6 +16,12 @@ const CENCOSUD_INTERNAL_ALIASES=Object.fromEntries(CENCOSUD_PARTS.map(name=>[nam
 export const DEFAULT_ALIASES = {
   [OSA]: 'OSA BEBESTIBLES 2',
   [FACING]: 'FACING CERVEZAS 2',
+  'OSA VINOS EMBONOR':'OSA VINOS 2',
+  'EXHIBICIONES ADICIONALES EMBONOR':'ESTUDIO DE EXHIBICIONES COCA COLA',
+  'OSA ABI EMBONOR':'ESTUDIO DE CERVEZAS 2',
+  'EXHIBICIONES ABI EMBONOR':'EXHIBICIONES CERVEZAS 2',
+  'EQUIPOS DE FRIO EMBONOR':'EQUIPOS DE FRIO BEBESTIBLES 2',
+  'POY':'POY 2026','FERIAS LIBRES':'FERIAS LIBRES',
   'QUIEBRES CRUZ VERDE':'QUIEBRES CRUZ VERDE',
   'CRUZ VERDE PROFUNDIDAD':'CV TEST',
   'PRECIOS COLGATE':'PRECIOS COLGATE',
@@ -65,12 +72,14 @@ export function buildHistory(report, {month,start,end,aliases,week=suggestPeriod
   const halfOf=day=>monday(day)<secondHalfStart?1:2;
   const lookup=new Map();
   for(const [study,alias] of Object.entries(aliases)){
-    const key=normalize(alias);
-    if(!key) fail(`Falta el nombre del export para ${study}.`);
-    if(lookup.has(key))fail(`El nombre del export «${alias}» se asignó a dos estudios.`);
-    lookup.set(key,study);
+    if(!normalize(alias))fail(`Falta el nombre del export para ${study}.`);
+    for(const name of [study,alias]){
+      const key=normalize(name);
+      if(lookup.has(key)&&lookup.get(key)!==study)fail(`El nombre del export «${name}» se asignó a dos estudios.`);
+      lookup.set(key,study);
+    }
   }
-  const totals=new Map(), halfTotals=new Map(), soviWeeks=new Map(), seen=new Set(), seenNames=new Set();
+  const totals=new Map(), halfTotals=new Map(), studyWeeks=new Map(),soviWeeks=new Map(), seen=new Set(), seenNames=new Set();
   const stats={rows:report.length,valid:0,ignoredStatus:0,ignoredPeriod:0,duplicates:0,unrelated:0};
   const problems=[];
   for(const r of report){
@@ -86,11 +95,14 @@ export function buildHistory(report, {month,start,end,aliases,week=suggestPeriod
     if(seen.has(key)){stats.duplicates++;continue;}
     seen.add(key);stats.valid++;
     const totalKey=JSON.stringify([study,r.folio]);totals.set(totalKey,(totals.get(totalKey)||0)+1);
+    if(!studyWeeks.has(totalKey))studyWeeks.set(totalKey,new Map());
+    const weekStart=monday(day),byWeek=studyWeeks.get(totalKey);
+    byWeek.set(weekStart,(byWeek.get(weekStart)||0)+1);
     const halfKey=JSON.stringify([study,r.folio,halfOf(day)]);halfTotals.set(halfKey,(halfTotals.get(halfKey)||0)+1);
     if(SOVI.includes(study)){
       const wk=monday(day);
       // Count completed past weeks; never merge components from different weeks.
-      if(wk>=monday(start))continue;
+      if(wk>=monday(start)&&week!==weeks)continue;
       if(!soviWeeks.has(r.folio))soviWeeks.set(r.folio,new Map());
       const folioWeeks=soviWeeks.get(r.folio);
       if(!folioWeeks.has(wk))folioWeeks.set(wk,new Set());
@@ -111,6 +123,11 @@ export function buildHistory(report, {month,start,end,aliases,week=suggestPeriod
   }
   return {stats,seenNames,incomplete,...boundaries,
     count:(study,folio)=>totals.get(JSON.stringify([study,folio]))||0,
+    weeklyCount:(study,folio)=>studyWeeks.get(JSON.stringify([study,folio]))?.size||0,
+    fortnightFulfilled:(study,folio)=>creditedWeeks(
+      study==='SOVI EMBONOR'?new Map([...(soviWeeks.get(folio)||[])].filter(([,names])=>names.size===8).map(([wk])=>[wk,1])):studyWeeks.get(JSON.stringify([study,folio]))||new Map(),
+      {rule:'fortnightly',target:2},{...boundaries,weeks}
+    ).reduce((sum,entry)=>sum+entry.fulfilledVisits,0),
     halfCount:(study,folio,half)=>halfTotals.get(JSON.stringify([study,folio,half]))||0,
     soviCount:folio=>sovi.get(folio)||0,
     soviHalfCount:(folio,half)=>soviHalves.get(JSON.stringify([folio,half]))||0};
@@ -179,7 +196,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(!options.monthRange&&start.slice(0,7)!==month&&end.slice(0,7)!==month)fail(`El mes elegido (${month}) no coincide con las fechas de carga (${start} a ${end}). Corrige las filas 2 y 3 de RETAIL o activa «Usar otras fechas de carga» e indica la semana correcta.`);
   const aliases={...DEFAULT_ALIASES,...CENCOSUD_INTERNAL_ALIASES,...options.aliases};
   const history=buildHistory(report,{month,start,end,aliases,week,weeks,monthRange:options.monthRange});
-  const half=week<=2?1:2;
+  const half=week<=2?1:2,last=week===weeks;
   const warnings=[...(planning.warnings||[])];
   if(dateWarning)warnings.push(dateWarning);
   warnings.push(...new Set(corrections));
@@ -202,7 +219,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   }
   const freq=row=>FORTNIGHTLY.includes(row.study)?'fortnightly':frequencies.get(JSON.stringify([CV.includes(row.study)?'CRUZ VERDE':'EMBONOR',row.folio]));
   for(const row of planning.rows){
-    if([OSA,...SOVI,FACING,...CV].includes(row.study)){
+    if([OSA,...REPLICAS,...SOVI,FACING,...CV].includes(row.study)){
       const f=freq(row),valid=CV.includes(row.study)?[2,3,4].includes(f):['fixed','fortnightly'].includes(f);
       if(!valid)frequencyProblems.push(`${row.study}: folio ${row.folio}, frecuencia ausente o no válida en UNIVERSO CHILE.`);
     }
@@ -210,7 +227,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(frequencyProblems.length)fail('Corrige las frecuencias antes de generar el ZIP.',[...new Set(frequencyProblems)]);
   const relevant=Object.keys(aliases).filter(s=>studies.has(s));
   if(hasReport){
-    const absent=relevant.filter(s=>!history.seenNames.has(normalize(aliases[s]))&&!(s==='CENCOSUD'&&CENCOSUD_PARTS.some(part=>history.seenNames.has(normalize(aliases[part])))));
+    const absent=relevant.filter(s=>!history.seenNames.has(normalize(aliases[s]))&&!history.seenNames.has(s)&&!(s==='CENCOSUD'&&CENCOSUD_PARTS.some(part=>history.seenNames.has(normalize(aliases[part])))));
     if(absent.length)warnings.push(`Sin registros en el export para: ${absent.map(s=>`${s} (${aliases[s]})`).join(', ')}. Se cuentan 0 visitas; comprueba que el export esté completo.`);
     if(history.stats.valid===0)warnings.push(`El export no aporta visitas válidas para el mes y fechas de esta selección. Para ${month}, solo se cuentan estudios configurados con estado TERMINADO y DIA desde el inicio del mes operativo (${csvDate(history.operationalStart)}) y anterior al inicio de carga (${csvDate(start)}). Si el planning conserva fechas de otra semana, activa «Usar otras fechas de carga» o corrige las filas 2 y 3 de RETAIL. Comprueba el período antes de cargar el ZIP.`);
   }
@@ -219,7 +236,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   const assign=(study,folio)=>assignments.get(study)?.add(folio);
   const decide=(row,selected,visits,reason)=>{
     if(selected)assign(row.study,row.folio);
-    const isSovi=SOVI.includes(row.study),isFortnightly=isSovi||FORTNIGHTLY.includes(row.study)||row.study===OSA&&freq(row)==='fortnightly'||CV.includes(row.study)&&freq(row)===2;
+    const isSovi=SOVI.includes(row.study),isFortnightly=isSovi||FORTNIGHTLY.includes(row.study)||[OSA,...REPLICAS].includes(row.study)&&freq(row)==='fortnightly'||CV.includes(row.study)&&freq(row)===2;
     const visitsFirstHalf=isFortnightly?(isSovi?history.soviHalfCount(row.folio,1):history.halfCount(row.study,row.folio,1)):null;
     const visitsSecondHalf=isFortnightly?(isSovi?history.soviHalfCount(row.folio,2):history.halfCount(row.study,row.folio,2)):null;
     decisions.push({...row,frequency:FORTNIGHTLY.includes(row.study)?'quincenal':freq(row)??'mensual / completa',visits,visitsFirstHalf,visitsSecondHalf,selected,reason});
@@ -228,17 +245,17 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   // holiday sample is chosen. Their frequency and closing rules stay intact.
   for(const s of CV){
     const quincenal=rows(s).filter(r=>freq(r)===2);
-    const selection=chooseFortnight(quincenal,quincenal,f=>history.count(s,f),(f,h)=>history.halfCount(s,f,h),week);
+    const selection=chooseFortnight(quincenal,quincenal,f=>last?history.fortnightFulfilled(s,f):history.count(s,f),(f,h)=>last?0:history.halfCount(s,f,h),last?4:week);
     for(const r of rows(s)){
       const v=history.count(s,r.folio),target=freq(r),yes=target===2?selection.chosen.has(r.folio):v<target;
-      decide(r,yes,v,target===2?fortnightReason(yes,v,history.halfCount(s,r.folio,half),week):yes?`Frecuencia mensual pendiente: ${v}/${target}`:`Frecuencia mensual cumplida: ${v}/${target}`);
+      decide(r,yes,v,last?(yes?'Cierre de mes: cuota mensual pendiente':'Cuota mensual cumplida'):target===2?fortnightReason(yes,v,history.halfCount(s,r.folio,half),week):yes?`Frecuencia mensual pendiente: ${v}/${target}`:`Frecuencia mensual cumplida: ${v}/${target}`);
     }
   }
   for(const s of FORTNIGHTLY){
-    const base=rows(s),selection=chooseFortnight(base,base,f=>history.count(s,f),(f,h)=>history.halfCount(s,f,h),week,true);
+    const base=rows(s),selection=chooseFortnight(base,base,f=>last?history.fortnightFulfilled(s,f):history.count(s,f),(f,h)=>last?0:history.halfCount(s,f,h),last?4:week,true);
     for(const r of base){
       const v=history.count(s,r.folio),yes=selection.chosen.has(r.folio);
-      decide(r,yes,v,fortnightReason(yes,v,history.halfCount(s,r.folio,half),week));
+      decide(r,yes,v,last?(yes?'Cierre de mes: medición mensual pendiente':'Cuota mensual cumplida'):fortnightReason(yes,v,history.halfCount(s,r.folio,half),week));
     }
   }
   for(const s of MONTHLY)for(const r of rows(s)){
@@ -251,33 +268,40 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
       const v=history.count(s,r.folio);decide(r,v===0,v,v===0?'Visita mensual pendiente':'Visita mensual completada');
     }
   }
-  for(const s of ['POY','FERIAS LIBRES'])for(const r of rows(s))decide(r,true,null,'Carga completa');
+  for(const s of ['POY','FERIAS LIBRES'])for(const r of rows(s)){
+    const v=history.weeklyCount(s,r.folio),yes=v<WEEKLY_MONTHLY_TARGET;
+    decide(r,yes,v,yes?`Semanal pendiente: ${v}/${WEEKLY_MONTHLY_TARGET}`:'Cuatro visitas semanales completadas; no repetir');
+  }
   const osaRows=rows(OSA),fixed=osaRows.filter(r=>freq(r)==='fixed');
-  const fixedTarget=Math.round(fixed.length*(1-.17*holidays));
+  const fixedPending=fixed.filter(r=>history.weeklyCount(OSA,r.folio)<WEEKLY_MONTHLY_TARGET);
+  const fixedTarget=Math.round(fixedPending.length*(1-.17*(last?0:holidays)));
   const osaQuincenal=osaRows.filter(r=>freq(r)==='fortnightly');
-  const osaFortnight=chooseFortnight(osaQuincenal,osaQuincenal,f=>history.count(OSA,f),(f,h)=>history.halfCount(OSA,f,h),week);
+  const osaFortnight=chooseFortnight(osaQuincenal,osaQuincenal,f=>last?history.fortnightFulfilled(OSA,f):history.count(OSA,f),(f,h)=>last?0:history.halfCount(OSA,f,h),last?4:week);
   const committed=[...decisions.filter(r=>r.selected),...osaQuincenal.filter(r=>osaFortnight.chosen.has(r.folio))];
-  const fixedChosen=chooseBalanced(fixed,fixedTarget,f=>history.count(OSA,f),committed);
+  const fixedChosen=chooseBalanced(fixedPending,fixedTarget,f=>history.weeklyCount(OSA,f),committed);
   for(const r of osaRows){
-    const v=history.count(OSA,r.folio),isFixed=freq(r)==='fixed';
+    const isFixed=freq(r)==='fixed',v=isFixed?history.weeklyCount(OSA,r.folio):history.count(OSA,r.folio);
     const yes=isFixed?fixedChosen.has(r.folio):osaFortnight.chosen.has(r.folio);
-    decide(r,yes,v,isFixed?(yes?'Fija semanal; menos visitas y, en empate, menor carga por auditor':'Ajuste por feriado; prioridad por visitas y carga del auditor'):fortnightReason(yes,v,history.halfCount(OSA,r.folio,half),week));
+    decide(r,yes,v,isFixed?(v>=WEEKLY_MONTHLY_TARGET?'Cuatro visitas semanales completadas; no repetir':yes?'Fija semanal pendiente; prioridad por visitas y carga del auditor':'Ajuste por feriado; prioridad por visitas y carga del auditor'):last?(yes?'Cierre de mes: medición mensual pendiente':'Cuota mensual cumplida'):fortnightReason(yes,v,history.halfCount(OSA,r.folio,half),week));
   }
   const osa=assignments.get(OSA)||new Set();
-  if(!studies.has(OSA)&&[...REPLICAS,...SOVI,FACING].some(s=>studies.has(s)))fail('Falta OSA BEBESTIBLES, necesario para seleccionar Embonor.');
+  if(!last&&!studies.has(OSA)&&[...REPLICAS,...SOVI,FACING].some(s=>studies.has(s)))fail('Falta OSA BEBESTIBLES, necesario para seleccionar Embonor.');
   for(const s of REPLICAS){
-    if(!studies.has(s)&&osa.size)fail(`Falta el estudio ${s} para replicar la selección OSA.`);
+    if(!last&&!studies.has(s)&&osa.size)fail(`Falta el estudio ${s} para replicar la selección OSA.`);
     const missing=[...osa].filter(f=>!byStudy.get(s)?.has(f));
-    if(missing.length)fail(`No se puede replicar OSA en ${s}: hay puntos no habilitados.`,missing.map(f=>`Folio ${f}`));
+    if(!last&&missing.length)fail(`No se puede replicar OSA en ${s}: hay puntos no habilitados.`,missing.map(f=>`Folio ${f}`));
     for(const r of rows(s)){
-      if(osa.has(r.folio)&&r.auditor!==byStudy.get(OSA).get(r.folio).auditor)fail(`Auditor inconsistente para el folio ${r.folio} en ${s}.`);
-      decide(r,osa.has(r.folio),null,osa.has(r.folio)?'Replica la selección OSA':'No seleccionado en OSA');
+      const isFixed=freq(r)==='fixed',v=isFixed?history.weeklyCount(s,r.folio):history.count(s,r.folio);
+      const pending=isFixed?v<WEEKLY_MONTHLY_TARGET:history.fortnightFulfilled(s,r.folio)<2;
+      const yes=last?pending:osa.has(r.folio)&&(!isFixed||pending);
+      if(!last&&yes&&r.auditor!==byStudy.get(OSA).get(r.folio).auditor)fail(`Auditor inconsistente para el folio ${r.folio} en ${s}.`);
+      decide(r,yes,v,last?(yes?'Cierre de mes: estudio pendiente; no requiere OSA':'Cuota mensual cumplida'):!pending?'Cuota mensual cumplida':yes?'Replica la selección OSA':'No seleccionado en OSA');
     }
   }
   const soviPresent=SOVI.filter(s=>studies.has(s));
   if(soviPresent.length&&soviPresent.length!==8)fail('Para generar SOVI EMBONOR deben existir los ocho estudios.',SOVI.filter(s=>!studies.has(s)));
-  const soviBase=osaRows.filter(r=>SOVI.every(s=>byStudy.get(s)?.has(r.folio)));
-  const soviEligible=soviBase.filter(r=>osa.has(r.folio));
+  const soviBase=(last?rows(SOVI[0]):osaRows).filter(r=>SOVI.every(s=>byStudy.get(s)?.has(r.folio)));
+  const soviEligible=last?soviBase:soviBase.filter(r=>osa.has(r.folio));
   if(soviPresent.length){
     const missing=osaRows.filter(r=>osa.has(r.folio)&&!SOVI.every(s=>byStudy.get(s)?.has(r.folio)));
     if(missing.length)warnings.push(`${missing.length} puntos seleccionados en OSA no son elegibles para SOVI porque no están habilitados en los ocho estudios. Se mantienen en OSA y pueden recibir Facing.`);
@@ -291,35 +315,35 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     // An uneven CHECKOUT subset can exceed half of the SOVI-only cohort; delaying
     // it would strand it next week once its OSA half has already been completed.
     const allocationWeek=type==='fortnightly'?(half===1?2:4):week;
-    const chosen=chooseFortnight(available,capacity,history.soviCount,history.soviHalfCount,allocationWeek);
+    const chosen=chooseFortnight(available,capacity,last?f=>history.fortnightFulfilled('SOVI EMBONOR',f):history.soviCount,last?()=>0:history.soviHalfCount,last?4:allocationWeek);
     chosen.chosen.forEach(f=>sovi.add(f));
     soviAuditors.push(...chosen.auditors.map(a=>({...a,frequency:type})));
   }
-  if(week===2||week>=4){
+  if(!last&&(week===2||week>=4)){
     const blocked=soviBase.filter(r=>!osa.has(r.folio)&&history.soviCount(r.folio)<2&&history.soviHalfCount(r.folio,half)===0);
     if(blocked.length)warnings.push(`${blocked.length} puntos SOVI pendientes de la quincena no se pueden seleccionar porque no están en OSA. Revisa estos cruces en el detalle; no se rompe la dependencia con OSA.`);
   }
   for(const s of SOVI)for(const r of rows(s)){
-    if(sovi.has(r.folio)&&r.auditor!==byStudy.get(OSA).get(r.folio).auditor)fail(`Auditor inconsistente para el folio ${r.folio} en ${s}.`);
+    const owner=byStudy.get(last?SOVI[0]:OSA)?.get(r.folio);
+    if(sovi.has(r.folio)&&owner&&r.auditor!==owner.auditor)fail(`Auditor inconsistente para el folio ${r.folio} en ${s}.`);
     const all=SOVI.every(n=>byStudy.get(n)?.has(r.folio)),yes=sovi.has(r.folio);
-    decide(r,yes,history.soviCount(r.folio),!osa.has(r.folio)?'No seleccionado en OSA':!all?'No habilitado en los ocho SOVI':fortnightReason(yes,history.soviCount(r.folio),history.soviHalfCount(r.folio,half),week));
+    decide(r,yes,history.soviCount(r.folio),!all?'No habilitado en los ocho SOVI':last?(yes?'Cierre de mes: medición SOVI pendiente; no requiere OSA':'Cuota mensual cumplida'):!osa.has(r.folio)?'No seleccionado en OSA':fortnightReason(yes,history.soviCount(r.folio),history.soviHalfCount(r.folio,half),week));
   }
-  const last=week===weeks;let facingExceptions=0,facingUnreachable=0;
+  let facingExceptions=0;
   for(const r of rows(FACING)){
-    const visits=history.count(FACING,r.folio),exception=last&&sovi.has(r.folio)&&visits===0&&osa.has(r.folio);
-    const yes=visits===0&&osa.has(r.folio)&&(!sovi.has(r.folio)||last);
+    const visits=history.count(FACING,r.folio),exception=last&&visits===0&&(!osa.has(r.folio)||sovi.has(r.folio));
+    const yes=visits===0&&(last||osa.has(r.folio)&&!sovi.has(r.folio));
     if(exception)facingExceptions++;
-    if(last&&visits===0&&!osa.has(r.folio))facingUnreachable++;
-    decide(r,yes,visits,visits>0?'Visita mensual Facing completada':!osa.has(r.folio)?'No seleccionado en OSA':exception?'Cierre de mes: excepción de coincidencia con SOVI':sovi.has(r.folio)?'Ya seleccionado en SOVI':'Facing pendiente, con OSA y sin SOVI');
+    decide(r,yes,visits,visits>0?'Visita mensual Facing completada':last?'Cierre de mes: Facing pendiente; no requiere OSA y puede coincidir con SOVI':!osa.has(r.folio)?'No seleccionado en OSA':sovi.has(r.folio)?'Ya seleccionado en SOVI':'Facing pendiente, con OSA y sin SOVI');
   }
-  if(facingExceptions)warnings.push(`Cierre de mes: ${facingExceptions} puntos Facing coinciden con SOVI para completar su visita mensual.`);
-  if(facingUnreachable)warnings.push(`Cierre de mes: ${facingUnreachable} puntos Facing siguen pendientes y no están en OSA. No pueden asignarse sin OSA; revisa la planeación y la capacidad de fijas.`);
+  if(last)warnings.push(`Cierre de mes (semana ${week} de ${weeks}): se cargan todos los estudios pendientes, sin exigir OSA, sin excluir coincidencias con SOVI y sin reducción por feriados. Los semanales con cuatro visitas válidas quedan fuera.`);
+  if(facingExceptions)warnings.push(`Cierre de mes: ${facingExceptions} puntos Facing usan la excepción de dependencia con OSA o coincidencia con SOVI.`);
   const soviBaseFolios=new Set(soviBase.map(r=>r.folio));
   const audited=decisions.filter(r=>r.visitsFirstHalf!==null&&(!SOVI.includes(r.study)||r.study===SOVI[0]&&soviBaseFolios.has(r.folio)));
   const repeated=audited.filter(r=>r.visitsFirstHalf>1||r.visitsSecondHalf>1);
-  if(repeated.length)warnings.push(`${repeated.length} combinaciones de punto y estudio ya tienen más de una medición en una misma quincena. Se respeta el máximo de dos al mes; consulta los conteos por quincena en el detalle.`);
+  if(repeated.length)warnings.push(`${repeated.length} combinaciones de punto y estudio ya tienen más de una medición en una misma quincena. El cumplimiento se limita a dos; el cierre puede programar una medición pendiente. Consulta los conteos por quincena en el detalle.`);
   const missed=audited.filter(r=>week>=3&&r.visitsFirstHalf===0);
-  if(missed.length)warnings.push(`${missed.length} combinaciones de punto y estudio no completaron la primera quincena. Una visita en la segunda no recupera la medición de la primera; no se duplican visitas dentro de la misma quincena.`);
+  if(missed.length)warnings.push(`${missed.length} combinaciones de punto y estudio no completaron la primera quincena. La última semana permite recuperar su cuota mensual con mediciones nuevas; el detalle conserva el conteo real de cada quincena.`);
   const files=[];
   for(const s of planning.studies){
     if(SOVI.includes(s.name))continue;

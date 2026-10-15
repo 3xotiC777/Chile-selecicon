@@ -235,8 +235,10 @@ test('Facing avoids SOVI normally and overlaps only during the declared last wee
   f.options.week=5;r=select(f);assert.equal(selected(r,FACING).size,9);assert(r.metrics.facingExceptions>0);assert(!selected(r,FACING).has('10'));
   f.options.week=4;f.options.weeks=4;r=select(f);assert.equal(selected(r,FACING).size,9);
 });
-test('Facing always requires OSA, including last week; unreachable points are reported',()=>{
-  const f=fixture();f.options.week=5;f.options.holidays=2;const r=select(f);for(const folio of selected(r,FACING))assert(selected(r,OSA).has(folio));assert(r.warnings.some(w=>w.includes('siguen pendientes')));
+test('Facing closing week includes every pending point, overriding normal crosses and holidays',()=>{
+  const f=fixture();f.options.week=5;f.options.holidays=2;const r=select(f);
+  assert.equal(selected(r,FACING).size,10);assert.equal(selected(r,OSA).size,10);
+  assert(r.warnings.some(w=>w.includes('sin exigir OSA')));
 });
 test('Cruz Verde counts each study separately and observes frequencies 2,3,4',()=>{
   const f=fixture();for(let folio=1;folio<=3;folio++)for(let d=1;d<=folio+1;d++)f.report.push(visit(CV[0],folio,`2026-09-0${d}`));
