@@ -84,7 +84,7 @@ export function progressSheets(points,period,{filters={}}={}){
       [`Mes operativo: ${shortDate(period.operationalStart)} al ${shortDate(period.operationalEnd)}. Corte: ${shortDate(period.asOf)}. Última actividad con fecha: ${shortDate(period.lastReportDay)||'Sin registros'}.`],
       [`Filtros: ${scope}. Una fila por folio y estudio. Auditor y datos del punto: base de planeación.`],
       ['TERMINADO: visita válida en la semana. SOVI: exige 8 estudios. SIN REGISTROS: sin estado fechado; no implica que el punto no se haya cargado.'],
-      [`${prefix}_n: semana calendario; 1 = TERMINADO o RECHAZO, 0 = VACIO, sin registro u otro estado. Sin fecha se muestra aparte. CUMPLIDAS cuenta solo visitas válidas; meta semanal: 4 al mes.`],
+      [`${prefix}_n: semana calendario; 1 = TERMINADO o RECHAZO, 0 = VACIO, sin registro u otro estado. Sin fecha se muestra aparte. CUMPLIDAS cuenta visitas válidas; meta semanal: 4 al mes. El cierre permite recuperar cuotas quincenales.`],
       columns.map(([,label])=>label),...rows
     ]};
   });

@@ -48,8 +48,9 @@ function updatePeriod(){
   $('report').required=week>1&&!shared;
   $('report-required').textContent=shared?'Se usará el avance compartido':week===1?'Opcional en semana 1':'Obligatorio desde semana 2';
   if(!$('report').files.length){$('report-name').textContent=shared?shared.name:'Reporte apoyo auditor';$('report').closest('.file-box').classList.toggle('loaded',!!shared);}
-  const schedule=week===1||week===3?'mitad por auditor.':week===5?'solo pendientes; sin tercera medición.':'segunda mitad y visitas pendientes de esta quincena.';
-  $('period-note').textContent=`${week<3?'Primera':'Segunda'} quincena · ${schedule} Aplica a SOVI, OSA quincenal, Cruz Verde de frecuencia 2, Precios Colgate y Colgate Promociones Farmacias. ${week===weeks?'Última semana: Facing puede coincidir con SOVI para cerrar pendientes.':''} ${holidays?'Fijas OSA: '+(100-17*holidays)+' % de la base.':'Fijas OSA: todas las de la planeación.'}`;
+  const closing=week===weeks;
+  const schedule=closing?'cierre mensual: todos los estudios pendientes, con excepción de los cruces habituales.':week===1||week===3?'mitad por auditor.':'segunda mitad y visitas pendientes de esta quincena.';
+  $('period-note').textContent=`${week<3?'Primera':'Segunda'} quincena · ${schedule} ${closing?'Réplicas, SOVI y Facing pueden cargarse sin OSA. Se permite recuperar la cuota quincenal con mediciones de cierre. Sin reducción por feriados.':'Reparto quincenal para SOVI, OSA quincenal, Cruz Verde de frecuencia 2, Precios Colgate y Colgate Promociones Farmacias.'} Semanales: hasta cuatro visitas TERMINADO en semanas distintas. ${!closing&&holidays?'Fijas OSA: '+(100-17*holidays)+' % de las pendientes.':''}`;
   document.querySelectorAll('.week-track span').forEach((s,i)=>s.classList.toggle('active',i+1===week));$('track5').hidden=weeks===4;
   updateDates();
   updateReady();
