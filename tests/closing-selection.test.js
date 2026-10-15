@@ -146,3 +146,20 @@ test('canonical and customized export names count weekly visits without requirin
   for(const day of starts.slice(0,4))input.report.push({...visit('POY','002',day),study:'POY PERSONALIZADO'});
   assert.deepEqual(folios(select(input),'POY'),['003']);
 });
+
+test('closing does not treat two first-half surveys as a completed monthly distribution',()=>{
+  const input=fixture();input.universe.filter(row=>row.client==='EMBONOR').forEach(row=>row.frequency='QUINCENALES');
+  for(const study of [OSA,...REPLICAS,...SOVI,...FORTNIGHTLY,...CV])addWeeks(input,study,'001',starts.slice(0,2));
+  const result=select(input);
+  for(const study of [OSA,...REPLICAS,...SOVI,...FORTNIGHTLY,...CV])assert(folios(result,study).includes('001'),study);
+  input.report.push(...result.files.flatMap(file=>file.rows).filter(r=>r.folio==='001').map(r=>visit(r.study,r.folio,starts[4])));
+  const tracking=buildTracking(input);
+  assert(tracking.points.filter(p=>p.folio==='001'&&p.rule==='fortnightly').every(p=>p.complete&&p.fulfilledVisits===2));
+});
+
+test('one closing SOVI measurement stays one even with duplicated component surveys',()=>{
+  const input=fixture();
+  for(const study of SOVI){input.report.push(visit(study,'001',starts[4]));input.report.push(visit(study,'001','2026-10-27'));}
+  const tracking=buildTracking(input),point=tracking.points.find(p=>p.folio==='001'&&p.study==='SOVI EMBONOR');
+  assert.equal(point.validVisits,1);assert.equal(point.fulfilledVisits,1);assert.equal(point.remaining,1);assert.equal(point.recoveredInClosing,0);
+});
