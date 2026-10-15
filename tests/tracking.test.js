@@ -60,7 +60,7 @@ test('SOVI components excluded by the month range cannot complete a measurement'
 });
 test('fixed OSA needs separate completed weeks, not repeated surveys in one week',()=>{
   const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1')],report:[visit('1',OSA,'2026-09-28'),visit('1',OSA,'2026-09-29'),visit('1',OSA,'2026-10-05')],options});
-  const p=point(r,OSA);assert.equal(p.target,5);assert.equal(p.validVisits,3);assert.equal(p.fulfilledVisits,2);assert.equal(p.remaining,3);assert.equal(p.progress,40);assert.equal(p.excessVisits,1);
+  const p=point(r,OSA);assert.equal(p.target,4);assert.equal(p.validVisits,3);assert.equal(p.fulfilledVisits,2);assert.equal(p.remaining,2);assert.equal(p.progress,50);assert.equal(p.excessVisits,1);
 });
 test('quincenal cannot be fulfilled by two first-half visits',()=>{
   const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1','QUINCENALES')],report:[visit('1',OSA,'2026-09-28'),visit('1',OSA,'2026-10-05')],options});

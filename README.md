@@ -89,6 +89,10 @@ Este equilibrio mejora la elección cuando existe margen dentro de las reglas. N
 
 Una visita TERMINADO prevalece sobre intentos fallidos de la misma semana; SOVI exige sus ocho componentes distintos. Las columnas finales muestran la meta mensual, cumplidas, pendientes y porcentaje según las reglas de frecuencia del dashboard: dos semanas terminadas en una misma quincena no cumplen dos cuotas quincenales. El archivo tiene filtros, encabezados y las primeras dos columnas inmovilizados, y colores por estado. Productividad conserva su descarga CSV.
 
+Los puntos semanales (OSA fija, sus réplicas, POY y Ferias Libres) tienen **meta mensual 4**, también en meses de cinco semanas. Se cuentan hasta cuatro semanas distintas con TERMINADO. La quinta semana permanece visible y puede completar una visita pendiente; no aumenta la meta a cinco. Esta regla se aplica a metas, pendientes, porcentajes y al gráfico del seguimiento.
+
+El Excel conserva las columnas de estado y añade indicadores numéricos por semana calendario ISO: `SUMCV_40`, `SUMCV_41`, etc. para Cruz Verde, y `SUMEMBONOR_n`, `SUMCOLGATE_n`, `SUMCENCOSUD_n`, `SUMPOY_n` para los demás clientes. **1** indica TERMINADO o RECHAZO en esa semana; **0**, VACIO, sin registros u otro estado. Si hubo varios intentos, basta uno terminado o rechazado. SOVI parcial solo marca 1 si hay rechazo o una medición completa. Los registros sin fecha no se asignan a ninguna semana. Estos indicadores no sustituyen los estados ni suman rechazos a las visitas cumplidas.
+
 - Planning: `RETAIL`, folios B desde fila 8, auditor P, nombre Q, códigos de estudio fila 6, nombres fila 7, fecha inicial fila 2 y final fila 3. Estudios hasta la columna TOTAL, celdas con valor 1. La lectura termina en el primer folio vacío o cero, como la macro original.
 - Universo: `FOLIO CADEM` (o `FOLIO`), `FRECUENCIA`, `CLIENTE`. El cruce incluye cliente y folio.
 - Export: `FOLIO`, `ESTUDIO`, `ESTADO`, `DIA`; `VISITA` se usa para deduplicar si existe. Se aceptan `.xlsx`, `.xlsm` y `.csv`.

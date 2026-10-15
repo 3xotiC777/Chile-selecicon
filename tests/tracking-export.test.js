@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import {DOMParser} from '@xmldom/xmldom';
 import {buildTracking} from '../src/tracking.js';
-import {progressSheets,progressWorkbook,weeklyStateLabel} from '../src/tracking-export.js';
+import {progressSheets,progressWorkbook,weeklyStateLabel,weeklyOutcomeFlag,calendarWeek} from '../src/tracking-export.js';
 import {OSA,SOVI,FACING} from '../src/engine.js';
 
 const options={month:'2026-10',week:2,weeks:5,start:'2026-10-05',end:'2026-10-10',monthRange:{start:'2026-09-28',end:'2026-10-31'}};
@@ -100,4 +100,39 @@ test('filtered exports omit other clients and sanitize colliding worksheet names
   const models=progressSheets(['A/B','A:B','a:b',"'Client'"] .map(client=>({...data.points[0],client})),data.period);
   assert.equal(new Set(models.map(model=>model.name.toUpperCase())).size,4);
   assert.ok(models.every(model=>model.name.length<=31&&!/[\[\]:*?/\\]/.test(model.name)));
+});
+
+test('additional SUMCV columns use calendar weeks and numeric outcome flags, preserving all states',async()=>{
+  const study='QUIEBRES CRUZ VERDE';
+  const data=track([{folio:'001',study}],[
+    visit('001',study,'2026-09-28'),visit('001',study,'2026-10-05','RECHAZO'),
+    visit('001',study,'2026-10-06','VACIO'),visit('001',study,'2026-10-12','VACIO'),
+    visit('001',study,'2026-10-26','EN PROCESO'),visit('001',study,'','RECHAZO')
+  ],{universe:[{client:'CRUZ VERDE',folio:'001',frequency:2}]});
+  const model=progressSheets(data.points,data.period)[0];
+  assert.deepEqual(model.columns.filter(([key])=>key.startsWith('flag:')).map(([,label])=>label),['SUMCV_40','SUMCV_41','SUMCV_42','SUMCV_43','SUMCV_44']);
+  assert.equal(model.columns.filter(([key])=>key.startsWith('week:')).length,5);
+  assert.deepEqual(model.rows[0].filter((_,i)=>model.columns[i][0].startsWith('flag:')),[1,1,0,0,0]);
+  assert.equal(model.rows[0][column(model,'week:2026-10-05')],'RECHAZO / VACIO');
+  assert.equal(data.points[0].fulfilledVisits,1);assert.equal(data.points[0].undatedRejected,1);
+  const book=XLSX.read(await progressWorkbook(data.points,data.period));
+  for(const [i,[key]] of model.columns.entries())if(key.startsWith('flag:'))assert.equal(book.Sheets['CRUZ VERDE'][XLSX.utils.encode_cell({r:6,c:i})].t,'n');
+});
+
+test('outcome flags reflect weekly completion or rejection without counting partial SOVI as finished',()=>{
+  assert.equal(weeklyOutcomeFlag({completedVisits:1,rejected:0}),1);
+  assert.equal(weeklyOutcomeFlag({completedVisits:0,rejected:1,empty:1}),1);
+  assert.equal(weeklyOutcomeFlag({completedVisits:0,rejected:0,completedStudies:7}),0);
+  assert.equal(weeklyOutcomeFlag({completedVisits:0,rejected:1,completedStudies:7}),1);
+  assert.equal(weeklyOutcomeFlag({empty:1}),0);assert.equal(weeklyOutcomeFlag(),0);
+  assert.equal(calendarWeek('2026-09-28'),40);assert.equal(calendarWeek('2026-10-05'),41);
+  assert.equal(calendarWeek('2027-01-01'),53);assert.equal(calendarWeek('2027-01-04'),1);
+});
+
+test('other client sheets also retain state columns and add their own weekly flags',()=>{
+  const data=track([{folio:'1',study:FACING}],[visit('1',FACING,'2026-09-28','RECHAZO')]);
+  const model=progressSheets(data.points,data.period)[0];
+  assert.equal(model.columns[column(model,'flag:2026-09-28')][1],'SUMEMBONOR_40');
+  assert.equal(model.rows[0][column(model,'flag:2026-09-28')],1);
+  assert.equal(model.rows[0][column(model,'fulfilledVisits')],0);
 });

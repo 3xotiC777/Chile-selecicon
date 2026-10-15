@@ -9,6 +9,17 @@ const compare=(a,b)=>String(a??'').localeCompare(String(b??''),'es',{numeric:tru
 const shortDate=value=>value?value.split('-').reverse().join('/'):'';
 const excelDate=value=>isoDate(value)?(Date.parse(isoDate(value)+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000:null;
 
+// ISO calendar week, independent of the operational month's week 1–5.
+export function calendarWeek(day){
+  const date=new Date(day+'T00:00:00Z');
+  date.setUTCDate(date.getUTCDate()+4-(date.getUTCDay()||7));
+  return Math.ceil(((date-Date.UTC(date.getUTCFullYear(),0,1))/86400000+1)/7);
+}
+
+export function weeklyOutcomeFlag(entry){
+  return entry?.completedVisits>0||entry?.rejected>0?1:0;
+}
+
 // Completed work wins over failed attempts in the same week. SOVI only
 // completes with all eight distinct components, as counted by buildTracking.
 export function weeklyStateLabel(entry){
@@ -47,16 +58,20 @@ export function progressSheets(points,period,{filters={}}={}){
   if(!weeks.length)throw new Error('Falta el rango del mes para descargar el avance por semana.');
   // Legacy snapshots cannot recover rejected/empty weeks from monthly totals.
   if(points.some(point=>!Array.isArray(point.weekStates)))throw new Error('Actualiza el seguimiento antes de descargar el avance semanal.');
-  const columns=[...fixedColumns,...weeks.map(week=>[`week:${monday(week.start)}`,`SEMANA ${week.week}\n${shortDate(week.start)} al ${shortDate(week.end)}`,34]),...totalColumns];
+  const stateColumns=weeks.map(week=>[`week:${monday(week.start)}`,`SEMANA ${week.week}\n${shortDate(week.start)} al ${shortDate(week.end)}`,34]);
   const groups=new Map(),used=new Set();
   for(const point of points){const client=point.client||'OTROS';if(!groups.has(client))groups.set(client,[]);groups.get(client).push(point);}
   const labels={client:'Cliente',study:'Estudio',auditor:'Auditor',region:'Región',status:'Estado',search:'Búsqueda',planned:'Solo planeación guardada'};
   const scope=Object.entries(filters).filter(([,v])=>v).map(([k,v])=>`${labels[k]||k}: ${v===true?'Sí':v}`).join('; ')||'Todos los puntos del mes';
   return [...groups].sort(([a],[b])=>compare(a,b)).map(([client,group])=>{
+    const prefix=client==='CRUZ VERDE'?'SUMCV':`SUM${client.replace(/\s+/g,'')}`;
+    const flagColumns=weeks.map(week=>[`flag:${monday(week.start)}`,`${prefix}_${calendarWeek(week.start)}`,19]);
+    const columns=[...fixedColumns,...stateColumns,...flagColumns,...totalColumns];
     const rows=group.slice().sort((a,b)=>compare(a.auditorName,b.auditorName)||compare(a.folio,b.folio)||compare(a.study,b.study)).map(point=>{
       const states=new Map(point.weekStates.map(entry=>[entry.weekStart,entry]));
       return columns.map(([key])=>{
         if(key.startsWith('week:'))return weeklyStateLabel(states.get(key.slice(5)));
+        if(key.startsWith('flag:'))return weeklyOutcomeFlag(states.get(key.slice(5)));
         if(key==='monthlyStatus')return point.target==null?'SIN FRECUENCIA':point.complete?'CUMPLIDO':point.fulfilledVisits>0?'EN AVANCE':'PENDIENTE';
         if(key==='progress')return point.target==null?null:point.progress/100;
         if(key==='lastVisit')return excelDate(point.lastVisit);
@@ -69,7 +84,7 @@ export function progressSheets(points,period,{filters={}}={}){
       [`Mes operativo: ${shortDate(period.operationalStart)} al ${shortDate(period.operationalEnd)}. Corte: ${shortDate(period.asOf)}. Última actividad con fecha: ${shortDate(period.lastReportDay)||'Sin registros'}.`],
       [`Filtros: ${scope}. Una fila por folio y estudio. Auditor y datos del punto: base de planeación.`],
       ['TERMINADO: visita válida en la semana. SOVI: exige 8 estudios. SIN REGISTROS: sin estado fechado; no implica que el punto no se haya cargado.'],
-      ['Vacías y rechazadas sin fecha se muestran aparte. CUMPLIDAS aplica la frecuencia mensual; repetir una visita no siempre aumenta la meta cumplida.'],
+      [`${prefix}_n: semana calendario; 1 = TERMINADO o RECHAZO, 0 = VACIO, sin registro u otro estado. Sin fecha se muestra aparte. CUMPLIDAS cuenta solo visitas válidas; meta semanal: 4 al mes.`],
       columns.map(([,label])=>label),...rows
     ]};
   });
