@@ -69,6 +69,26 @@ test('concurrent save conflicts preserve the database message and do not pretend
   assert.equal(calls.filter(call => call[0] === 'table').length, 0);
 });
 
+test('a confirmed write does not depend on downloading the full workspace again',async()=>{
+  const {client,calls}=fakeClient();
+  client.from=()=>{throw new Error('canceling statement due to statement timeout');};
+  const receipt=await createCloud({client}).saveWorkspace({month:'2026-10',revision:2,selection},{reload:false});
+  assert.equal(receipt.revision,3);assert.equal(calls.filter(call=>call[0]==='rpc').length,1);
+});
+
+test('a database statement timeout is never treated as a confirmed save',async()=>{
+  const {client}=fakeClient({rpcError:{code:'57014',message:'canceling statement due to statement timeout'}});
+  await assert.rejects(()=>createCloud({client}).saveWorkspace({month:'2026-10',revision:2,selection},{reload:false}),error=>error.code==='57014');
+});
+
+test('a missing or stale RPC receipt cannot claim success',async()=>{
+  const {client}=fakeClient();
+  for(const data of [null,{}, {revision:2}]){
+    client.rpc=async()=>({data});
+    await assert.rejects(()=>createCloud({client}).saveWorkspace({month:'2026-10',revision:2,selection},{reload:false}),/confirmación válida/);
+  }
+});
+
 test('invalid month, mismatched selected period and missing revision cannot be persisted', () => {
   for (const invalid of [
     { month: '2026-13', revision: 0 },

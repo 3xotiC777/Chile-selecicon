@@ -13,7 +13,11 @@ export function latestSavedPlan(plans=[]){
 }
 
 export function compactSelection(result){
-  const selection={files:result.files,period:result.period,metrics:result.metrics,warnings:result.warnings,workload:result.workload,soviAuditors:result.soviAuditors};
+  // Monthly RETAIL already stores addresses and other descriptive fields. Saved
+  // ZIPs need only the CSV fields plus the study name used by the dashboard.
+  const columns=['folio','auditor','study','studyId','start','end'];
+  const files=result.files.map(file=>({...file,rows:file.rows.map(row=>Object.fromEntries(columns.filter(key=>Object.hasOwn(row,key)).map(key=>[key,row[key]])))}));
+  const selection={files,period:result.period,metrics:result.metrics,warnings:result.warnings,workload:result.workload,soviAuditors:result.soviAuditors};
   if(Array.isArray(result.decisions))selection.decisions=result.decisions.map(({folio,study,selected,reason})=>({folio,study,selected,reason}));
   return selection;
 }

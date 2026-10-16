@@ -122,14 +122,20 @@ export function createCloud({ url = defaultUrl, key = defaultKey, client } = {})
       }
       throw new CloudError('El seguimiento se está actualizando. Vuelve a cargarlo en unos segundos.');
     },
-    async saveWorkspace(input) {
+    async saveWorkspace(input,{reload=true}={}) {
       validateSave(input);
-      checked(await supabase.rpc('chile_save_workspace', {
+      const receipt=checked(await supabase.rpc('chile_save_workspace', {
         p_month: input.month, p_expected_revision: input.revision,
         p_planning: input.planning ?? null, p_universe: input.universe ?? null,
         p_report: input.report ?? null, p_selection: input.selection ?? null,
         p_metadata: input.metadata || {},
       }));
+      // A successful RPC response confirms the transaction. Reading every saved
+      // ZIP again is not part of that write and can independently time out.
+      if(!reload){
+        if(!Number.isSafeInteger(receipt?.revision)||receipt.revision<=input.revision)throw new CloudError('El servidor no devolvió una confirmación válida del guardado.');
+        return receipt;
+      }
       return cloud.loadWorkspace();
     },
     async listUsers() { return accessAction({ action: 'list' }); },

@@ -5,7 +5,8 @@ import {csvRows} from './engine.js';
 import {TRACKING_ALIASES,reportForPeriod} from './tracking.js';
 import {mountMonthRange} from './month-range.js';
 import {zipSync,strToU8} from 'fflate';
-import {compactSelection,latestSavedPlan} from './saved-planning.js';
+import {latestSavedPlan} from './saved-planning.js';
+import {selectionSaveInput} from './selection-save-input.js';
 
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -113,17 +114,13 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
   async function saveSelection(draft){
     if(!admin())throw new Error('Solo el administrador puede guardar una planeación.');
     if(!draft)throw new Error('Genera de nuevo la selección antes de guardar.');
-    const selection=compactSelection(draft.result),{month}=selection.period;
-    const planning={...draft.planning,rows:draft.planning.rows.filter(r=>!draft.options.excludedFolios?.includes(r.folio)).map(r=>({...r,auditor:draft.options.auditorOverrides?.[r.folio]||r.auditor}))};
+    const input=selectionSaveInput(draft,workspace),{month,selection}=input;
     const changed=workspace?.month&&workspace.month!==month;
-    const metadata={...draft.metadata,options:{...draft.options,...selection.period,aliases:{...TRACKING_ALIASES,...draft.options.aliases}},selectionOrigin:'Guardada por el administrador'};
     if(changed&&!confirm(`Guardar ${month} reemplazará el seguimiento y los ZIP de ${workspace.month}. Ya revisaste la nueva selección. ¿Iniciar el mes ${month}?`))throw new Error('Se canceló el cambio de mes. La selección sigue disponible para descargar.');
-    const saved=await cloud.saveWorkspace({month,planning,universe:draft.universe,report:reportForPeriod(draft.report,selection.period),selection,metadata,revision:draft.workspaceRevision??workspace?.revision??0});
-    const plan=saved.weeklyPlans.find(plan=>plan.month===month&&plan.week===selection.period.week);
-    if(!plan||plan.result.period.start!==selection.period.start||plan.result.period.end!==selection.period.end)throw new Error('No se pudo confirmar la semana guardada. Actualiza el seguimiento y vuelve a generar la selección.');
+    await cloud.saveWorkspace(input,{reload:false});
     const dashboardUpdated=await refresh({force:true});
     if(changed||!draft.metadata.reportName)await synchronize();
-    return {period:plan.result.period,savedAt:plan.updatedAt,dashboardUpdated:dashboardUpdated===true};
+    return {period:selection.period,dashboardUpdated:dashboardUpdated===true};
   }
   function authForm(){
     $('auth-view').innerHTML=`<div class="login-copy"><p class="eyebrow">OPERACIÓN CHILE</p><h1>${setupToken?'Activa tu administrador':'Planeación y avance, en un solo lugar.'}</h1><p>${setupToken?'Elige el correo y la contraseña de la primera cuenta. Este enlace se usa una sola vez.':'Consulta las visitas del mes, los pendientes y la última planeación compartida.'}</p><div class="login-feature"><strong>Avance real</strong><span>Solo TERMINADO cumple la meta. Vacíos y rechazos quedan visibles.</span></div><div class="login-feature"><strong>Acceso por usuario</strong><span>Campo consulta y descarga. Administración prepara y actualiza.</span></div></div><form id="login-form" class="login-form"><h2>${setupToken?'Crear administrador':'Iniciar sesión'}</h2>${setupToken?'<label>Nombre<input id="login-name" autocomplete="name" required maxlength="120" /></label>':''}<label>Correo<input id="login-email" type="email" autocomplete="username" required /></label><label>Contraseña<input id="login-password" type="password" autocomplete="${setupToken?'new-password':'current-password'}" required ${setupToken?'minlength="12"':''} maxlength="128" /></label>${setupToken?'<label>Confirmar contraseña<input id="login-confirm" type="password" autocomplete="new-password" required minlength="12" /></label><p class="note">Mínimo 12 caracteres. Después podrás crear las cuentas del equipo.</p>':''}<button id="login-submit" class="primary" type="submit">${setupToken?'Crear administrador':'Entrar'}</button><p id="auth-status" role="status" class="portal-message"></p><p class="note">Las cuentas las administra el responsable de Chile.</p></form>`;

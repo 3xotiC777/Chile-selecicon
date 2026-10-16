@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {compactSelection,latestSavedPlan,savedPlanningIndex,planningStatusLabel,planningWeekLabel} from '../src/saved-planning.js';
 import {buildTracking} from '../src/tracking.js';
-import {SOVI,FACING} from '../src/engine.js';
+import {SOVI,FACING,csvRows} from '../src/engine.js';
 const period={month:'2026-10',week:3,weeks:5,start:'2026-10-12',end:'2026-10-17'};
 const selection={period,files:[{rows:[{folio:'001',study:FACING,start:period.start,end:period.end}]}],decisions:[{folio:'001',study:FACING,selected:true,reason:'Facing pendiente'},{folio:'002',study:FACING,selected:false,reason:'Ya seleccionado en SOVI'}]};
 
@@ -20,6 +20,17 @@ test('saved decisions survive compact serialization with only the audit fields',
   assert.equal(planningStatusLabel(yes),'Sí');assert.equal(yes.notPlannedReason,'');
   assert.equal(planningStatusLabel(no),'No');assert.equal(no.notPlannedReason,'Ya seleccionado en SOVI');
   assert.equal(yes.planningWeek,'Semana 3 de octubre');assert.equal(no.planningWeek,yes.planningWeek);
+});
+
+test('compact saved rows reproduce identical CSVs without duplicating monthly descriptive data',()=>{
+  const row={folio:'001',auditor:'02',study:FACING,studyId:'03',start:period.start,end:period.end,auditorName:'Ana',address:'Dirección del punto',region:'XV',sourceRow:8};
+  const source={...selection,files:[{name:'FACING.csv',rows:[row]}]};
+  const compact=compactSelection(source);
+  assert.equal(csvRows(compact.files[0].rows),csvRows(source.files[0].rows));
+  assert.equal(compact.files[0].rows[0].study,FACING);
+  assert.equal(compact.files[0].rows[0].address,undefined);
+  assert.equal(row.address,'Dirección del punto');
+  assert.equal(savedPlanningIndex(compact)('001',FACING).plannedCurrentWeek,true);
 });
 
 test('legacy missing reasons and absent plans are distinguished without invented exclusions',()=>{
