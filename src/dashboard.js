@@ -5,6 +5,9 @@ import { DASHBOARD_SORT_DEFAULTS, DASHBOARD_SORT_COLUMNS, sortDashboardRows, poi
 import {summarizeWeeklyProgress} from './weekly-progress.js';
 import {weeklyChartMarkup,weeklyDetailText} from './weekly-chart.js';
 import {planningStatusLabel} from './saved-planning.js';
+// Load the exporter with the dashboard. A later deployment must not invalidate
+// a lazy chunk needed by an already-open dashboard's download button.
+import {progressWorkbook,detailWorkbook,PROGRESS_MIME} from './tracking-export.js';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
 const number = value => Number(value || 0).toLocaleString('es-CL');
@@ -54,6 +57,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
   const filters = {...DEFAULT_DASHBOARD_FILTERS};
   const orders = {auditors:{...DASHBOARD_SORT_DEFAULTS.auditors},points:{...DASHBOARD_SORT_DEFAULTS.points}};
   let data = null, metadata = {}, page = 1, loading = false, error = '', exporting = false;
+  let detailExportMessage = '', detailExportError = false;
   let currentPoints = [], currentMonthlyPoints = [], currentAuditors = [], weeklySeries = null, selectedWeek = null, weeklyCalendarKey = null;
   const controller = new AbortController();
   const listen = (element, type, handler) => element.addEventListener(type, handler, {signal:controller.signal});
@@ -104,6 +108,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
       <section class="tracking-section" aria-labelledby="${prefix}-points-title">
         <div class="tracking-section-heading"><div><p class="eyebrow">PUNTOS Y VISITAS</p><h2 id="${prefix}-points-title">Detalle de cumplimiento</h2></div><p data-dashboard="point-count" class="tracking-small" aria-live="polite"></p></div>
         <button type="button" class="text-button" data-action="export-detail">Descargar esta tabla · Excel</button>
+        <p data-dashboard="detail-export-status" class="tracking-small" role="status" aria-live="polite" hidden></p>
         <p class="tracking-small">Programado indica si este folio y estudio está en la última planeación guardada. El motivo corresponde a esa selección; las visitas muestran el avance actualizado. La descarga incluye todas las filas filtradas, en el orden de la tabla.</p>
         <div data-dashboard="detail-scope" class="tracking-detail-scope" aria-live="polite"></div>
         <div data-dashboard="points" class="tracking-table-wrap tracking-points"></div>
@@ -117,6 +122,10 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     container.querySelector('[data-action="refresh"]').disabled = loading || !onRefresh;
     container.querySelector('[data-action="export-progress"]').disabled = !data || exporting;
     container.querySelector('[data-action="export-detail"]').disabled = !data || exporting;
+    const detailStatus=find('detail-export-status');
+    detailStatus.textContent=detailExportMessage;
+    detailStatus.hidden=!detailExportMessage;
+    detailStatus.classList.toggle('tracking-message-error',detailExportError);
     container.querySelector('[data-action="download-plan"]').disabled = !onDownloadPlanning || !metadata.lastPlanningAvailable || loading;
   }
 
@@ -293,16 +302,20 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
       const rows=kind==='productivity'?currentAuditors:currentPoints;
       const period=data.period,exportOptions={filters:{...filters},planPeriod:metadata.planPeriod||data.planPeriod,planningAvailable:metadata.lastPlanningAvailable};
       const filename=`${kind==='progress'?'AVANCE':kind==='detail'?'DETALLE_CUMPLIMIENTO':'PRODUCTIVIDAD'}_CHILE_${period?.month || 'MES'}.${kind==='productivity'?'csv':'xlsx'}`;
+      if(kind==='detail'){detailExportMessage='Preparando Excel de la tabla…';detailExportError=false;}
       exporting=true;error='';renderMessage();
       try {
         let content,type='text/csv;charset=utf-8';
         if(kind!=='productivity'){
-          const {progressWorkbook,detailWorkbook,PROGRESS_MIME}=await import('./tracking-export.js');
           content=await (kind==='detail'?detailWorkbook:progressWorkbook)(rows,period,exportOptions);type=PROGRESS_MIME;
         }else content=productivityCsv(rows);
         if(onExport)await onExport({kind,rows,filename,content,type});else download(content,filename,type);
+        if(kind==='detail')detailExportMessage=`Descarga iniciada: ${filename}. Revisa las descargas del navegador.`;
       }
-      catch(failure) {error=failure.message || 'No se pudo descargar el avance.';}
+      catch(failure) {
+        error=failure.message || 'No se pudo descargar el Excel. Vuelve a intentarlo.';
+        if(kind==='detail'){detailExportMessage=error;detailExportError=true;}
+      }
       finally {exporting=false;renderMessage();}
     }
   }
