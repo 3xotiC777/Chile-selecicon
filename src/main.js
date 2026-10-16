@@ -7,6 +7,8 @@ import { captureFile } from './files.js';
 import { initPortal } from './portal.js';
 import { mountMonthRange } from './month-range.js';
 import { sharedReportFor } from './report-source.js';
+import { createSelectionSaver } from './selection-save.js';
+import { planningWeekLabel } from './saved-planning.js';
 const $=id=>document.getElementById(id);
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number=value=>Number(value).toLocaleString('es-CL');
@@ -15,6 +17,17 @@ let universe=null,result=null,zip=null,revision=0,periodRevision=0,busy=false,un
 const snapshots={},fileLabels={planning:'la planeación',report:'el export',universe:'el universo'};
 let planningOutputSource=null,markedPlanning=null;
 let generatedDraft=null,portal=null,sharedWorkspace=null;
+const selectionSaver=createSelectionSaver({save:draft=>portal.saveSelection(draft),onChange:renderSaveStatus});
+function renderSaveStatus(state=selectionSaver.getState()){
+  const message=$('selection-save-status'),retry=$('save-selection');
+  if(message){
+    const label=planningWeekLabel(generatedDraft?.result.period);
+    message.textContent=state.phase==='saved'?`${label} guardada.${state.receipt?.dashboardUpdated===false?' Pulsa Actualizar en Avance para volver a cargar el seguimiento.':' Ya está disponible en el avance compartido.'}`:state.phase==='saving'?`Guardando ${label.toLowerCase()}…`:state.phase==='error'?`No se confirmó el guardado de ${label.toLowerCase()}. ${state.error} La selección sigue disponible; el avance puede mostrar la planeación anterior.`:'Esta selección se guardará automáticamente en el seguimiento compartido.';
+    message.classList.toggle('error',state.phase==='error');
+  }
+  if(retry){retry.hidden=state.phase!=='error';retry.disabled=state.phase==='saving';}
+  $('generate').disabled=busy||state.phase==='saving'||selectionSaver.isSaving();
+}
 $('month').value=new Date().toISOString().slice(0,7);
 const selectionCalendar=mountMonthRange($('selection-month-range'),{month:$('month').value,onChange:()=>{periodRevision++;invalidate();updatePeriod();},onSave:(month,range)=>portal?.saveMonthRange(month,range)});
 $('aliases').innerHTML=Object.entries(DEFAULT_ALIASES).filter(([name])=>name!=='CRUZ VERDE PROFUNDIDAD').map(([name,alias])=>`<label>${escape(name)}<input data-alias="${escape(name)}" value="${escape(alias)}" /></label>`).join('');
@@ -28,7 +41,7 @@ function runWorker(task,data,progress){
     worker.postMessage({task,data});
   });
 }
-function invalidate(){revision++;result=null;zip=null;generatedDraft=null;planningOutputSource=null;markedPlanning=null;$('results').hidden=true;if(!busy)$('status').replaceChildren();}
+function invalidate(){revision++;result=null;zip=null;generatedDraft=null;selectionSaver.setDraft(null);planningOutputSource=null;markedPlanning=null;$('results').hidden=true;if(!busy)$('status').replaceChildren();}
 function resetSelectionSession(){
   sharedWorkspace=null;
   invalidate();$('results').replaceChildren();$('selection-form').reset();
@@ -68,7 +81,7 @@ function updateDates(){
   const monthRange=selectionCalendar.getRange();
   if(start)note.textContent+=` Conteo del export: desde ${(monthRange?.start||operationalMonthStart(start,Number($('week').value))).split('-').reverse().join('/')} hasta antes del ${start.split('-').reverse().join('/')}${monthRange?`, dentro del rango mensual guardado hasta ${monthRange.end.split('-').reverse().join('/')}`:', incluyendo los días del mes anterior que pertenecen a la primera semana operativa'}.`;
 }
-function updateReady(){const missing=[],shared=sharedReportFor(sharedWorkspace,$('month').value,selectionCalendar.getRange());if(!selectionCalendar.getRange())missing.push('confirmar el rango del mes');if(!planningDates)missing.push('planeación');if(!universe)missing.push('universo');if(($('report').files.length||Number($('week').value)>1&&!shared)&&!snapshots.report?.bytes)missing.push('export');$('ready-note').textContent=missing.length?'Pendiente: '+missing.join(', ')+'.':'Archivos listos. Genera la selección y revisa el resumen.';}
+function updateReady(){const missing=[],shared=sharedReportFor(sharedWorkspace,$('month').value,selectionCalendar.getRange());if(!selectionCalendar.getRange())missing.push('confirmar el rango del mes');if(!planningDates)missing.push('planeación');if(!universe)missing.push('universo');if(($('report').files.length||Number($('week').value)>1&&!shared)&&!snapshots.report?.bytes)missing.push('export');$('ready-note').textContent=missing.length?'Pendiente: '+missing.join(', ')+'.':portal?.canWrite()?'Archivos listos. Al generar, la selección se guardará automáticamente.':'Archivos listos. Genera la selección y revisa el resumen.';}
 function updateUniverse(name){$('universe-name').textContent=`${name} · ${number(universe.length)} frecuencias`;$('universe').closest('.file-box').classList.add('loaded');$('forget').hidden=false;updateReady();}
 try{const cached=JSON.parse(localStorage.getItem(CACHE));if(cached?.version===1&&Array.isArray(cached.rows)&&cached.rows.length){universe=cached.rows;updateUniverse(cached.name);}}catch{/* Browser storage may be unavailable. */}
 $('forget').addEventListener('click',()=>{invalidate();universe=null;$('universe').value='';universeTask=null;delete snapshots.universe;try{localStorage.removeItem(CACHE);}catch{}$('universe-name').textContent='Selecciona UNIVERSO CHILE.xlsx';$('universe').closest('.file-box').classList.remove('loaded');$('forget').hidden=true;updateReady();});
@@ -111,13 +124,10 @@ function renderResults(){
   $('results').innerHTML=`<div class="result-header"><div><p class="eyebrow">SELECCIÓN GENERADA</p><h2>Lista para revisar y descargar</h2><p>${escape(result.period.start)} al ${escape(result.period.end)} · semana ${result.period.week} de ${result.period.weeks}</p></div><button type="button" id="download" class="primary">Descargar ZIP <span>↓</span></button></div><div class="metrics">${[[m.points,'Puntos únicos'],[m.rows,'Asignaciones'],[m.files,'Archivos CSV'],[m.auditors,'Auditores']].map(([n,label])=>`<div><strong>${number(n)}</strong><span>${label}</span></div>`).join('')}</div>${result.warnings.length?`<div class="warnings"><strong>Observaciones de la selección</strong><ul>${result.warnings.map(w=>`<li>${escape(w)}</li>`).join('')}</ul></div>`:''}<p class="note">Fijas OSA: ${number(m.fixedTarget)} de ${number(m.fixedTotal)}. SOVI: ${number(m.sovi)} puntos × 8 estudios. Export: ${number(result.history.valid)} encuestas válidas utilizadas; ${number(result.history.duplicates)} duplicadas omitidas.</p><div class="table-wrap"><table><thead><tr><th>Archivo de carga</th><th class="number">Puntos</th><th class="number">Filas</th></tr></thead><tbody>${result.files.map(f=>`<tr><td>${escape(f.name)}</td><td class="number">${number(new Set(f.rows.map(r=>r.folio)).size)}</td><td class="number">${number(f.rows.length)}</td></tr>`).join('')}</tbody></table></div><details><summary>Reparto de SOVI por auditor y frecuencia</summary><div class="table-wrap"><table><thead><tr><th>Auditor</th><th>Frecuencia</th><th class="number">Base de reparto</th><th class="number">Pendientes con OSA</th><th class="number">Seleccionados</th></tr></thead><tbody>${result.soviAuditors.map(a=>`<tr><td>${escape(a.name)} (${escape(a.auditor)})</td><td>${a.frequency==='fixed'?'Fija':'Quincenal'}</td><td class="number">${a.eligible}</td><td class="number">${a.pending}</td><td class="number">${a.selected}</td></tr>`).join('')}</tbody></table></div></details><details><summary>Revisar puntos y motivos de selección</summary><div class="detail-tools"><label>Buscar folio, auditor o estudio<input id="search" placeholder="Ej. folio o nombre del auditor" /></label><button type="button" class="text-button" id="review-download">Descargar detalle de revisión</button></div><p class="note">Quincena ${result.period.half} en curso; la segunda comienza el ${escape(result.period.secondHalfStart)}. Este detalle incluye seleccionados y excluidos, con las visitas de cada quincena. Se descarga por separado; el ZIP solo contiene los CSV de carga.</p><div id="decision-rows" class="detail-table"></div></details>`;
   $('results').hidden=false;
   if(portal?.canWrite()){
-    const save=document.createElement('button');save.type='button';save.id='save-selection';save.className='secondary';save.textContent='Guardar planeación compartida';
-    $('results').querySelector('.result-header').after(save);
-    save.addEventListener('click',async()=>{
-      save.disabled=true;
-      try{await portal.saveSelection(generatedDraft);save.textContent='Planeación guardada';}
-      catch(e){showStatus(e.message,true);save.disabled=false;}
-    });
+    const status=document.createElement('p');status.id='selection-save-status';status.className='portal-message';status.setAttribute('role','status');
+    const save=document.createElement('button');save.type='button';save.id='save-selection';save.className='secondary';save.textContent='Reintentar guardado';
+    $('results').querySelector('.result-header').after(status,save);
+    save.addEventListener('click',()=>selectionSaver.save());renderSaveStatus();
   }
   const downloads=document.createElement('div');downloads.className='result-downloads';
   const zipButton=$('download');zipButton.replaceWith(downloads);downloads.append(zipButton);
@@ -152,7 +162,7 @@ function renderResults(){
   $('search').addEventListener('input',details);details();
 }
 $('selection-form').addEventListener('submit',async event=>{
-  event.preventDefault();if(busy)return;invalidate();busy=true;const submittedRevision=revision;
+  event.preventDefault();if(busy||selectionSaver.isSaving())return;invalidate();busy=true;const submittedRevision=revision;
   $('generate').disabled=true;$('generate').textContent='Procesando…';$('selection-form').setAttribute('aria-busy','true');
   try{
     if(portal&&!portal.canPlan())throw new Error('Solo el administrador puede generar planeaciones.');
@@ -172,14 +182,16 @@ $('selection-form').addEventListener('submit',async event=>{
     options.auditorOverrides=Object.fromEntries(correctionEntries.map(s=>s.split('=').map(v=>v.trim())));
     showStatus('Leyendo archivos en tu navegador…');
     const shared=!reportFile?sharedReportFor(sharedWorkspace,options.month,options.monthRange):null;
+    const workspaceRevision=sharedWorkspace?.revision||0;
     const loaded=await runWorker('select',{planning:planningSnapshot.bytes,report:reportFile?reportSnapshot.bytes:null,reportRows:shared?.rows,universe,options},message=>showStatus(message));
     if(submittedRevision!==revision){showStatus('Cambiaste los archivos o ajustes durante el cálculo. Genera de nuevo la selección.');return;}
-    result=loaded.data;zip=loaded.zip;generatedDraft={...loaded.context,result,metadata:{planningName:planningFile.name,reportName:reportFile?.name||shared?.name||'',reportSource:reportFile?'manual':shared?.source||'',universeName:snapshots.universe?.file.name||'Universo guardado'}};planningOutputSource={bytes:planningSnapshot.bytes,points:loaded.points,name:planningFile.name};renderResults();$('status').replaceChildren();$('results').scrollIntoView({behavior:'smooth',block:'start'});
+    result=loaded.data;zip=loaded.zip;generatedDraft={...loaded.context,result,workspaceRevision,metadata:{planningName:planningFile.name,reportName:reportFile?.name||shared?.name||'',reportSource:reportFile?'manual':shared?.source||'',universeName:snapshots.universe?.file.name||'Universo guardado'}};selectionSaver.setDraft(generatedDraft);planningOutputSource={bytes:planningSnapshot.bytes,points:loaded.points,name:planningFile.name};renderResults();$('status').replaceChildren();$('results').scrollIntoView({behavior:'smooth',block:'start'});
+    if(portal?.canWrite())await selectionSaver.save();
   }catch(e){showStatus(e.message,true,e.details);}
-  finally{busy=false;$('generate').disabled=false;$('generate').innerHTML='Generar selección <span>→</span>';$('selection-form').removeAttribute('aria-busy');}
+  finally{busy=false;renderSaveStatus();$('generate').innerHTML='Generar selección <span>→</span>';$('selection-form').removeAttribute('aria-busy');}
 });
 portal=initPortal({runWorker,onWorkspace:workspace=>{
-  if(sharedWorkspace?.revision!==workspace.revision&&!$('report').files.length)invalidate();
+  if(sharedWorkspace?.revision!==workspace.revision&&!$('report').files.length&&!generatedDraft&&!busy)invalidate();
   sharedWorkspace=workspace;
   if(!busy&&!snapshots.universe&&workspace.universe?.length){universe=workspace.universe;updateUniverse(workspace.metadata.universeName||'Universo compartido');}
   if(workspace.metadata.options?.monthRange){
