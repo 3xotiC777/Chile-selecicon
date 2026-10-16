@@ -5,13 +5,14 @@ import {csvRows} from './engine.js';
 import {TRACKING_ALIASES,reportForPeriod} from './tracking.js';
 import {mountMonthRange} from './month-range.js';
 import {zipSync,strToU8} from 'fflate';
+import {compactSelection,latestSavedPlan} from './saved-planning.js';
 
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const n=value=>Number(value||0).toLocaleString('es-CL');
 function download(bytes,type,name){const url=URL.createObjectURL(new Blob([bytes],{type})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 export function selectionZip(selection){return zipSync(Object.fromEntries(selection.files.map(file=>[file.name,strToU8(csvRows(file.rows))])),{level:6});}
-export function compactSelection(result){return {files:result.files,period:result.period,metrics:result.metrics,warnings:result.warnings,workload:result.workload,soviAuditors:result.soviAuditors};}
+export {compactSelection} from './saved-planning.js';
 
 export function initPortal({runWorker,onWorkspace,resetSelection}){
   const cloud=createCloud();let access=null,workspace=null,loading=null,section='dashboard',authRevision=0,accessSync=null,loadingRevision=0,syncing=false;
@@ -21,7 +22,7 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
   $('import-month').addEventListener('input',()=>importCalendar.setMonth($('import-month').value));
   let setupToken=new URLSearchParams(location.hash.slice(1)).get('activar');
   if(setupToken)history.replaceState(null,'',location.pathname+location.search);
-  const dashboard=mountDashboard($('dashboard'),{onRefresh:()=>refresh(),onDownloadPlanning:()=>downloadPlan(workspace?.weeklyPlans[0])});
+  const dashboard=mountDashboard($('dashboard'),{onRefresh:()=>refresh(),onDownloadPlanning:()=>downloadPlan(latestSavedPlan(workspace?.weeklyPlans))});
   const message=(id,text,error=false)=>{$(id).textContent=text;$(id).classList.toggle('error',error);};
   const admin=()=>access?.role==='admin';
   function view(name){
@@ -74,8 +75,8 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
         renderSyncStatus(syncStatus);
         if(!workspace.planning){dashboard.setSnapshot(null);renderPlans();return;}
         const options={...workspace.metadata.options,month:workspace.month};
-        const latest=workspace.weeklyPlans[0];
-        const tracked=await runWorker('tracking',{planning:workspace.planning,universe:workspace.universe,report:workspace.report,options:{...options,assignments:latest?.result.files.flatMap(f=>f.rows)||[]}});
+        const latest=latestSavedPlan(workspace.weeklyPlans);
+        const tracked=await runWorker('tracking',{planning:workspace.planning,universe:workspace.universe,report:workspace.report,options:{...options,savedSelection:latest?.result||null}});
         if(revision!==authRevision)return;
         dashboard.setSnapshot({tracking:tracked.data,updatedAt:workspace.updatedAt,planningName:workspace.metadata.planningName,reportName:workspace.metadata.reportName,planPeriod:latest?.result.period,lastPlanningAvailable:!!latest});
         renderPlans();

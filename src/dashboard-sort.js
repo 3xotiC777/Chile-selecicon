@@ -44,8 +44,9 @@ const definitions = {
     // The displayed pair sorts by empty surveys, then by rejected surveys.
     failures: row => [numeric(row?.empty),numeric(row?.rejected)],
     lastVisit: row => [visitDate(row)],
-    // These are three known display states, including an unassigned point.
-    planned: row => [row?.plannedCurrentWeek ? row.currentWeekCompleted ? 0 : 1 : 2]
+    planned: row => [row?.planningAvailable===false?2:row?.plannedCurrentWeek?0:1],
+    planningWeek: row => [text(row?.planningWeek)],
+    notPlannedReason: row => [text(row?.notPlannedReason)]
   }
 };
 

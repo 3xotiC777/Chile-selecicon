@@ -63,10 +63,10 @@ test('vacías/rechazos sorts by the visible first number then second number, num
   assert.deepEqual(ids(sortDashboardRows(rows,'points','failures')),['c','b','a']);
   assert.deepEqual(ids(sortDashboardRows(rows,'points','failures','desc')),['a','b','c']);
 });
-test('planning states sort completed, pending and unassigned and reverse on descending',()=>{
+test('planning states sort saved membership independently of completion',()=>{
   const rows=[{folio:'none',plannedCurrentWeek:false},{folio:'pending',plannedCurrentWeek:true,currentWeekCompleted:false},{folio:'done',plannedCurrentWeek:true,currentWeekCompleted:true}];
   assert.deepEqual(ids(sortDashboardRows(rows,'points','planned')),['done','pending','none']);
-  assert.deepEqual(ids(sortDashboardRows(rows,'points','planned','desc')),['none','pending','done']);
+  assert.deepEqual(ids(sortDashboardRows(rows,'points','planned','desc')),['none','done','pending']);
 });
 test('survey empty and rejection columns support the original count names',()=>{
   const rows=[{auditor:'a',empty:10,rejected:2},{auditor:'b',empty:2,rejected:10}];

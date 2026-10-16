@@ -2,6 +2,7 @@
 // A SOVI measurement is eight distinct completed studies within one field week.
 import {normalize,id,isoDate,monday,frequency,SelectionError,OSA,REPLICAS,SOVI,FACING,CV,FORTNIGHTLY,MONTHLY,DEFAULT_ALIASES} from './engine.js';
 import {resolveOperationalPeriod,suggestPeriod,validateMonthRange} from './period.js';
+import {savedPlanningIndex} from './saved-planning.js';
 import {WEEKLY_MONTHLY_TARGET,creditedWeeks} from './visit-goals.js';
 
 export const TRACKING_ALIASES={...DEFAULT_ALIASES,
@@ -130,7 +131,8 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
     }
   }
   const excluded=new Set((options.excludedFolios||[]).map(id));
-  const assignments=options.assignments||[];const planned=new Map();
+  const assignments=options.savedSelection?.files.flatMap(file=>file.rows)||options.assignments||[];const planned=new Map();
+  const planningInfo=savedPlanningIndex(options.savedSelection||(assignments.length?{files:[{rows:assignments}]}:null));
   for(const row of assignments){for(const study of normalize(row.study)==='CENCOSUD'?['PRECIOS CENCOSUD','FOTOGRAFIAS CENCOSUD']:[consolidatedStudy(normalize(row.study))]){const k=key(study,id(row.folio));if(!planned.has(k))planned.set(k,row);}}
   const quality={rows:report.length,duplicates:0,invalidDates:0,invalidCompletedDates:0,undatedEmpty:0,undatedRejected:0,outsidePeriod:0,unknownStudies:0,unplannedPoints:0,invalidDurations:0,missingFrequencies:0,ineligibleSovi:0,incompleteSovi:0,unknownStudyNames:[]};
   const aggregates=new Map(),soviWeeks=new Map(),dailyMap=new Map(),seen=new Set(),unknownNames=new Set(),weeklyStates=new Map();
@@ -221,7 +223,7 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
     const remaining=goal.target===null?null:Math.max(0,goal.target-fulfilledVisits),complete=goal.target!==null&&remaining===0,plan=planned.get(pKey);
     const status=complete?'complete':fulfilledVisits>0?'partial':metric.rejected>0?'rejected':metric.empty>0?'empty':'pending';
     const weekStates=[...(weeklyStates.get(pKey)?.values()||[])].sort((a,b)=>sorted(a.weekStart,b.weekStart)).map(entry=>({...entry,otherStatuses:[...entry.otherStatuses].sort(sorted),completedVisits:completedByWeek.get(entry.weekStart)||0,completedStudies:study==='SOVI EMBONOR'?(soviWeeks.get(row.folio)?.get(entry.weekStart)?.size||0):null}));
-    points.push({folio:row.folio,client,study,studyId:study==='SOVI EMBONOR'?null:row.studyId||null,auditor:row.auditor,auditorName:row.auditorName,coordinator:row.coordinator||'',office:row.office||'',measurementDay:row.measurementDay||'',location:row.location||row.address||'',address:row.address||'',region:row.region||'',commune:row.commune||'',chain:row.chain||'',...goal,weekStates,validVisits,fulfilledVisits,fulfilledByWeek,recoveredInClosing,remaining,progress:percent(fulfilledVisits,goal.target),visitsFirstHalf,visitsSecondHalf,weeklyVisits,empty:metric.empty,rejected:metric.rejected,other:metric.other,undatedEmpty:metric.undatedEmpty||0,undatedRejected:metric.undatedRejected||0,attempts:metric.attempts,lastVisit:metric.lastVisit,plannedCurrentWeek:!!plan,plannedWeekStart:plan?.start||null,plannedWeekEnd:plan?.end||null,currentWeekCompleted,plannedPending:!!plan&&!currentWeekCompleted,incompleteWeeks,partialSovi,complete,status,excessVisits:Math.max(0,validVisits-fulfilledVisits)});
+    points.push({folio:row.folio,client,study,studyId:study==='SOVI EMBONOR'?null:row.studyId||null,auditor:row.auditor,auditorName:row.auditorName,coordinator:row.coordinator||'',office:row.office||'',measurementDay:row.measurementDay||'',location:row.location||row.address||'',address:row.address||'',region:row.region||'',commune:row.commune||'',chain:row.chain||'',...goal,...planningInfo(row.folio,study),weekStates,validVisits,fulfilledVisits,fulfilledByWeek,recoveredInClosing,remaining,progress:percent(fulfilledVisits,goal.target),visitsFirstHalf,visitsSecondHalf,weeklyVisits,empty:metric.empty,rejected:metric.rejected,other:metric.other,undatedEmpty:metric.undatedEmpty||0,undatedRejected:metric.undatedRejected||0,attempts:metric.attempts,lastVisit:metric.lastVisit,plannedCurrentWeek:!!plan,plannedWeekStart:plan?.start||null,plannedWeekEnd:plan?.end||null,currentWeekCompleted,plannedPending:!!plan&&!currentWeekCompleted,incompleteWeeks,partialSovi,complete,status,excessVisits:Math.max(0,validVisits-fulfilledVisits)});
   }
   points.sort((a,b)=>sorted(a.client,b.client)||sorted(a.study,b.study)||sorted(a.auditorName,b.auditorName)||sorted(a.folio,b.folio));
   const daily=[...dailyMap.values()].map(d=>({...d,minutes:Math.round(d.minutes*10000)/10000})).sort((a,b)=>sorted(a.day,b.day)||sorted(a.auditor,b.auditor)||sorted(a.study,b.study));

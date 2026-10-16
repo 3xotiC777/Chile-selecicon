@@ -4,6 +4,7 @@ import { DEFAULT_DASHBOARD_FILTERS, dashboardScopes, clearDashboardDetailFilters
 import { DASHBOARD_SORT_DEFAULTS, DASHBOARD_SORT_COLUMNS, sortDashboardRows, pointStatusLabel } from './dashboard-sort.js';
 import {summarizeWeeklyProgress} from './weekly-progress.js';
 import {weeklyChartMarkup,weeklyDetailText} from './weekly-chart.js';
+import {planningStatusLabel} from './saved-planning.js';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
 const number = value => Number(value || 0).toLocaleString('es-CL');
@@ -13,7 +14,7 @@ const field = (value, fallback = '—') => escape(value == null || value === '' 
 const PAGE_SIZE = 40;
 const TABLE_HEADERS = {
   auditors:[['name','Auditor'],['surveys','Encuestas',true],['completedSurveys','TERMINADO',true],['fieldDays','Días activos',true],['surveysPerDay','Encuestas / día',true],['averageMinutes','Minutos / encuesta',true],['surveyEmpty','Vacías',true],['surveyRejected','Rechazadas',true]],
-  points:[['folio','Punto / estudio'],['auditor','Auditor'],['status','Estado'],['target','Meta',true],['fulfilledVisits','Cumplidas',true],['remaining','Faltan',true],['failures','Vacías / rech.',true],['lastVisit','Última visita'],['planned','Planeación guardada']]
+  points:[['folio','Punto / estudio'],['auditor','Auditor'],['status','Estado'],['target','Meta',true],['fulfilledVisits','Cumplidas',true],['remaining','Faltan',true],['failures','Vacías / rech.',true],['lastVisit','Última visita'],['planned','Programado en última planeación'],['planningWeek','Semana de la última planeación'],['notPlannedReason','Motivo de no programación']]
 };
 let instance = 0;
 
@@ -102,6 +103,8 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
       </section>
       <section class="tracking-section" aria-labelledby="${prefix}-points-title">
         <div class="tracking-section-heading"><div><p class="eyebrow">PUNTOS Y VISITAS</p><h2 id="${prefix}-points-title">Detalle de cumplimiento</h2></div><p data-dashboard="point-count" class="tracking-small" aria-live="polite"></p></div>
+        <button type="button" class="text-button" data-action="export-detail">Descargar esta tabla · Excel</button>
+        <p class="tracking-small">Programado indica si este folio y estudio está en la última planeación guardada. El motivo corresponde a esa selección; las visitas muestran el avance actualizado. La descarga incluye todas las filas filtradas, en el orden de la tabla.</p>
         <div data-dashboard="detail-scope" class="tracking-detail-scope" aria-live="polite"></div>
         <div data-dashboard="points" class="tracking-table-wrap tracking-points"></div>
         <div data-dashboard="pagination" class="tracking-pagination"></div>
@@ -113,6 +116,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     find('message').innerHTML = error ? `<div class="tracking-message tracking-message-error" role="alert">${escape(error)}</div>` : loading ? '<div class="tracking-message" role="status">Actualizando el seguimiento compartido…</div>' : '';
     container.querySelector('[data-action="refresh"]').disabled = loading || !onRefresh;
     container.querySelector('[data-action="export-progress"]').disabled = !data || exporting;
+    container.querySelector('[data-action="export-detail"]').disabled = !data || exporting;
     container.querySelector('[data-action="download-plan"]').disabled = !onDownloadPlanning || !metadata.lastPlanningAvailable || loading;
   }
 
@@ -208,7 +212,7 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
       const state = pointState(point);
       const halves = point.rule === 'fortnightly';
       const partial = point.partialSovi?.length ? `<details class="tracking-sovi-detail"><summary>${number(point.partialSovi.length)} semana${point.partialSovi.length>1?'s':''} SOVI incompleta${point.partialSovi.length>1?'s':''}</summary><ul>${point.partialSovi.map(week => `<li>${date(week.weekStart)}: ${number(week.completedStudies)} de 8 TERMINADO.<br>Faltan: ${(week.missingStudies || []).map(escape).join(', ')}.</li>`).join('')}</ul></details>` : '';
-      return `<tr><td><strong class="tracking-folio">${field(point.folio)}</strong><span>${field(point.study)}</span><small>${field([point.commune,point.region].filter(Boolean).join(' · '),point.client||'—')}</small>${point.location ? `<small>${escape(point.location)}</small>` : ''}</td><td><strong>${field(point.auditorName || point.auditor)}</strong><small>${field(point.auditor)}</small></td><td><span class="tracking-badge ${state.className}">${state.label}</span>${halves?`<small>Q1: ${number(point.visitsFirstHalf)} · Q2: ${number(point.visitsSecondHalf)}</small>`:''}${point.recoveredInClosing?`<small>${number(point.recoveredInClosing)} recuperada en cierre</small>`:''}${partial}</td><td class="number">${point.target==null?'—':number(point.target)}</td><td class="number">${number(point.fulfilledVisits)}${Number(point.validVisits)>Number(point.fulfilledVisits)?`<small>${number(point.validVisits)} válidas</small>`:''}</td><td class="number">${point.remaining==null?'—':number(point.remaining)}</td><td class="number">${number(point.empty)} / ${number(point.rejected)}</td><td>${point.lastVisit?date(point.lastVisit):'Sin visita'}</td><td>${point.plannedCurrentWeek?`<span class="tracking-badge ${point.currentWeekCompleted?'complete':'planned'}">${point.currentWeekCompleted?'Visita completada':'Enviado · pendiente'}</span>`:'—'}</td></tr>`;
+      return `<tr><td><strong class="tracking-folio">${field(point.folio)}</strong><span>${field(point.study)}</span><small>${field([point.commune,point.region].filter(Boolean).join(' · '),point.client||'—')}</small>${point.location ? `<small>${escape(point.location)}</small>` : ''}</td><td><strong>${field(point.auditorName || point.auditor)}</strong><small>${field(point.auditor)}</small></td><td><span class="tracking-badge ${state.className}">${state.label}</span>${halves?`<small>Q1: ${number(point.visitsFirstHalf)} · Q2: ${number(point.visitsSecondHalf)}</small>`:''}${point.recoveredInClosing?`<small>${number(point.recoveredInClosing)} recuperada en cierre</small>`:''}${partial}</td><td class="number">${point.target==null?'—':number(point.target)}</td><td class="number">${number(point.fulfilledVisits)}${Number(point.validVisits)>Number(point.fulfilledVisits)?`<small>${number(point.validVisits)} válidas</small>`:''}</td><td class="number">${point.remaining==null?'—':number(point.remaining)}</td><td class="number">${number(point.empty)} / ${number(point.rejected)}</td><td>${point.lastVisit?date(point.lastVisit):'Sin visita'}</td><td><span class="tracking-badge ${point.planningAvailable===false?'unknown':point.plannedCurrentWeek?'planned':'pending'}">${planningStatusLabel(point)}</span></td><td>${field(point.planningWeek)}</td><td class="tracking-plan-reason">${field(point.notPlannedReason)}</td></tr>`;
     }).join('')}</tbody></table>` : '<div class="tracking-no-results"><strong>No hay puntos con estos filtros.</strong><p>Limpia el estado o la búsqueda para ver otros puntos del mes.</p><button type="button" class="text-button" data-action="reset">Limpiar filtros</button></div>';
     find('pagination').innerHTML = currentPoints.length ? `<span>Mostrando ${number((page-1)*PAGE_SIZE+1)}–${number(Math.min(page*PAGE_SIZE,currentPoints.length))} de ${number(currentPoints.length)}</span><div><button type="button" class="tracking-page-button" data-action="previous"${page===1?' disabled':''} aria-label="Página anterior">←</button><span>Página ${page} de ${pages}</span><button type="button" class="tracking-page-button" data-action="next"${page===pages?' disabled':''} aria-label="Página siguiente">→</button></div>` : '';
   }
@@ -283,18 +287,18 @@ export function mountDashboard(container, {snapshot = null, onRefresh, onDownloa
     if (action === 'download-plan' && onDownloadPlanning) {
       try {await onDownloadPlanning();} catch(failure) {error=failure.message || 'No se pudo descargar la planeación.';renderMessage();}return;
     }
-    if (action === 'export-progress' || action === 'export-productivity') {
+    if (action === 'export-progress' || action === 'export-productivity' || action === 'export-detail') {
       if (!data || exporting) return;
-      const kind=action==='export-progress'?'progress':'productivity';
-      const rows=kind==='progress'?currentPoints:currentAuditors;
-      const period=data.period,exportFilters={...filters};
-      const filename=`${kind==='progress'?'AVANCE':'PRODUCTIVIDAD'}_CHILE_${period?.month || 'MES'}.${kind==='progress'?'xlsx':'csv'}`;
+      const kind=action==='export-progress'?'progress':action==='export-detail'?'detail':'productivity';
+      const rows=kind==='productivity'?currentAuditors:currentPoints;
+      const period=data.period,exportOptions={filters:{...filters},planPeriod:metadata.planPeriod||data.planPeriod,planningAvailable:metadata.lastPlanningAvailable};
+      const filename=`${kind==='progress'?'AVANCE':kind==='detail'?'DETALLE_CUMPLIMIENTO':'PRODUCTIVIDAD'}_CHILE_${period?.month || 'MES'}.${kind==='productivity'?'csv':'xlsx'}`;
       exporting=true;error='';renderMessage();
       try {
         let content,type='text/csv;charset=utf-8';
-        if(kind==='progress'){
-          const {progressWorkbook,PROGRESS_MIME}=await import('./tracking-export.js');
-          content=await progressWorkbook(rows,period,{filters:exportFilters});type=PROGRESS_MIME;
+        if(kind!=='productivity'){
+          const {progressWorkbook,detailWorkbook,PROGRESS_MIME}=await import('./tracking-export.js');
+          content=await (kind==='detail'?detailWorkbook:progressWorkbook)(rows,period,exportOptions);type=PROGRESS_MIME;
         }else content=productivityCsv(rows);
         if(onExport)await onExport({kind,rows,filename,content,type});else download(content,filename,type);
       }

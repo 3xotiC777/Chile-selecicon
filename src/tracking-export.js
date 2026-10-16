@@ -2,6 +2,8 @@ import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import {isoDate,monday} from './engine.js';
 import {summarizeWeeklyProgress} from './weekly-progress.js';
+import {pointStatusLabel} from './dashboard-sort.js';
+import {planningStatusLabel} from './saved-planning.js';
 
 export const PROGRESS_MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const HEADER_ROW=6;
@@ -120,8 +122,44 @@ function stateStyle(value){
   return 6;
 }
 
+export function detailSheet(points,period,{filters={},planPeriod,planningAvailable}={}){
+  if(!points.length)throw new Error('No hay puntos con estos filtros para descargar.');
+  const columns=[
+    ['folio','FOLIO',16],['study','ESTUDIO',38],['client','CLIENTE',18],['auditorName','AUDITOR',30],['auditor','COD. AUDITOR',16],
+    ['commune','COMUNA',22],['region','REGIÓN',14],['location','LOCAL / DIRECCIÓN',40],['status','ESTADO',23],
+    ['target','META',12],['fulfilledVisits','CUMPLIDAS',14],['validVisits','VISITAS TERMINADAS',22],['remaining','FALTAN',12],
+    ['visitsFirstHalf','Q1',10],['visitsSecondHalf','Q2',10],['empty','VACÍAS',12],['rejected','RECHAZOS',12],
+    ['lastVisit','ÚLTIMA VISITA',18],['programmed','PROGRAMADO EN ÚLTIMA PLANEACIÓN',24],['planningWeek','SEMANA DE LA ÚLTIMA PLANEACIÓN',28],['notPlannedReason','MOTIVO DE NO PROGRAMACIÓN',60]
+  ];
+  const rows=points.map(point=>columns.map(([key])=>{
+    if(key==='programmed')return planningStatusLabel(point);
+    if(key==='status')return pointStatusLabel(point);
+    if(key==='lastVisit')return excelDate(point.lastVisit);
+    if((key==='visitsFirstHalf'||key==='visitsSecondHalf')&&point.rule!=='fortnightly')return null;
+    return point[key]??null;
+  }));
+  const scope=Object.entries(filters).filter(([,value])=>value).map(([key,value])=>`${({client:'Cliente',study:'Estudio',auditor:'Auditor',region:'Región',status:'Estado',search:'Búsqueda',planned:'Solo programados'})[key]||key}: ${value===true?'Sí':value}`).join('; ')||'Todos los puntos del mes';
+  const available=planningAvailable??points.some(point=>point.planningAvailable!==false);
+  return {name:'Detalle de cumplimiento',columns,rows,values:[
+    [`DETALLE DE CUMPLIMIENTO · ${period.month}`],
+    [`${points.length} puntos y estudios · ${new Set(points.map(point=>point.folio)).size} folios únicos · ${points.filter(point=>point.plannedCurrentWeek).length} programados.`],
+    [available?`Última planeación guardada${planPeriod?.week?`: semana ${planPeriod.week}`:''}${planPeriod?.start?` · ${shortDate(planPeriod.start)} al ${shortDate(planPeriod.end)}`:''}.`:'No hay una planeación guardada.'],
+    [`Filtros: ${scope}. Todas las filas filtradas, en el orden de la tabla.`],
+    ['Las visitas son el avance actualizado. La programación y su motivo corresponden a la selección guardada. CUMPLIDAS aplica las cuotas; VISITAS TERMINADAS incluye repeticiones.'],
+    columns.map(([,label])=>label),...rows
+  ]};
+}
+
+export async function detailWorkbook(points,period,options={}){
+  return styledWorkbook([detailSheet(points,period,options)]);
+}
+
 export async function progressWorkbook(points,period,options={}){
-  const sheets=progressSheets(points,period,options),book=XLSX.utils.book_new();
+  return styledWorkbook(progressSheets(points,period,options));
+}
+
+async function styledWorkbook(sheets){
+  const book=XLSX.utils.book_new();
   for(const model of sheets){
     const sheet=XLSX.utils.aoa_to_sheet(model.values);
     sheet['!cols']=model.columns.map(([, ,width])=>({wch:width}));

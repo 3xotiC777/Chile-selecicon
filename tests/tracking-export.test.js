@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import {DOMParser} from '@xmldom/xmldom';
 import {buildTracking} from '../src/tracking.js';
-import {progressSheets,progressWorkbook,weeklyStateLabel,weeklyOutcomeFlag,calendarWeek} from '../src/tracking-export.js';
+import {progressSheets,progressWorkbook,detailWorkbook,detailSheet,weeklyStateLabel,weeklyOutcomeFlag,calendarWeek} from '../src/tracking-export.js';
 import {OSA,SOVI,FACING} from '../src/engine.js';
 
 const options={month:'2026-10',week:2,weeks:5,start:'2026-10-05',end:'2026-10-10',monthRange:{start:'2026-09-28',end:'2026-10-31'}};
@@ -13,6 +13,23 @@ let visitId=0;
 const visit=(folio,study,day,status='TERMINADO',extra={})=>({folio,study,day,status,visit:String(++visitId),...extra});
 const track=(rows,report=[],extra={})=>buildTracking({planning:planning(rows),report,options,...extra});
 const column=(model,key)=>model.columns.findIndex(([name])=>name===key);
+
+test('detail workbook is a single table preserving all filtered rows, their order and saved planning evidence',async()=>{
+  const data=track([{folio:'001',study:FACING,auditorName:'=Ana'},{folio:'002',study:FACING}],[],{options:{...options,savedSelection:{period:{...options,week:3},files:[{rows:[{folio:'001',study:FACING}]}],decisions:[{folio:'002',study:FACING,selected:false,reason:'Ya seleccionado en SOVI'}]}}});
+  const points=[...data.points].reverse();
+  const book=XLSX.read(await detailWorkbook(points,data.period,{filters:{search:'00'},planPeriod:{...options,week:3},planningAvailable:true}));
+  assert.deepEqual(book.SheetNames,['Detalle de cumplimiento']);
+  const sheet=book.Sheets[book.SheetNames[0]],model=detailSheet(points,data.period);
+  const cell=(row,key)=>sheet[XLSX.utils.encode_cell({r:row,c:column(model,key)})];
+  assert.equal(cell(6,'folio').v,'002');assert.equal(cell(7,'folio').v,'001');
+  assert.equal(cell(6,'programmed').v,'No');assert.equal(cell(7,'programmed').v,'Sí');
+  assert.equal(cell(6,'notPlannedReason').v,'Ya seleccionado en SOVI');
+  assert.equal(cell(6,'planningWeek').v,'Semana 3 de octubre');
+  assert.equal(cell(7,'auditorName').v,'=Ana');assert.equal(cell(7,'auditorName').f,undefined);
+  assert.equal(cell(6,'validVisits').t,'n');assert.match(sheet.A4.v,/Búsqueda: 00/);
+  assert.equal(model.columns.some(([key])=>key.startsWith('week:')),false);
+  assert.throws(()=>detailSheet([],data.period),/No hay puntos/);
+});
 
 test('weekly states include September in October, preserve failures, and deduplicate visits',()=>{
   const v=visit('001',OSA,'2026-09-28');
