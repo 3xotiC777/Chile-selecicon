@@ -91,6 +91,7 @@ create or replace function public.chile_save_workspace(
 language plpgsql
 security invoker
 set search_path = ''
+set statement_timeout = '30s'
 as $$
 declare
   current_workspace public.chile_workspace%rowtype;
