@@ -45,10 +45,14 @@ test('weekly states include September in October, preserve failures, and dedupli
   assert.match(model.columns[column(model,'week:2026-10-26')][1],/31\/10\/2026/);
 });
 
-test('completed weeks are factual even when only one fulfills a fortnightly quota',()=>{
+test('two completed weeks in the same half fulfill the monthly quota in the Excel',()=>{
   const data=track([{folio:'1',study:OSA}],['2026-09-28','2026-10-05'].map(day=>visit('1',OSA,day)),{universe:[{client:'EMBONOR',folio:'1',frequency:'QUINCENALES'}]});
   assert.deepEqual(data.points[0].weekStates.map(weeklyStateLabel),['TERMINADO','TERMINADO']);
-  assert.equal(data.points[0].fulfilledVisits,1);assert.equal(data.points[0].remaining,1);
+  assert.equal(data.points[0].fulfilledVisits,2);assert.equal(data.points[0].remaining,0);
+  const model=progressSheets(data.points,data.period)[0];
+  assert.equal(model.rows[0][column(model,'fulfilledVisits')],2);
+  assert.equal(model.rows[0][column(model,'remaining')],0);
+  assert.equal(model.rows[0][column(model,'monthlyStatus')],'CUMPLIDO');
 });
 
 test('SOVI reports partial components per week and requires eight distinct studies to finish',()=>{

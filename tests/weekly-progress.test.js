@@ -42,11 +42,11 @@ test('weekly fixed quotas count each week once, removing duplicates and same-wee
   assert.deepEqual(point.fulfilledByWeek,[{weekStart:'2026-09-28',fulfilledVisits:1},{weekStart:'2026-10-05',fulfilledVisits:1}]);
   assert.equal(timelineSum(point),point.fulfilledVisits);assert.equal(result.quality.duplicates,1);
 });
-test('quincenal contributions choose the first completed week of each half, irrespective of export row order',()=>{
+test('quincenal contributions credit the first two monthly measurements irrespective of half and export order',()=>{
   const report=['2026-10-19','2026-10-05','2026-10-12','2026-09-28'].map(day=>visit('1',OSA,day));
   const result=tracking([{folio:'1',study:OSA}],report,[{client:'EMBONOR',folio:'1',frequency:'QUINCENALES'}]);
   const point=result.points[0];assert.equal(point.validVisits,4);assert.equal(point.fulfilledVisits,2);
-  assert.deepEqual(point.fulfilledByWeek,[{weekStart:'2026-09-28',fulfilledVisits:1},{weekStart:'2026-10-12',fulfilledVisits:1}]);
+  assert.deepEqual(point.fulfilledByWeek,[{weekStart:'2026-09-28',fulfilledVisits:1},{weekStart:'2026-10-05',fulfilledVisits:1}]);
   assert.equal(timelineSum(point),point.fulfilledVisits);
 });
 test('monthly quotas retain earliest completed visits and cap excess in a later week',()=>{
@@ -57,13 +57,13 @@ test('monthly quotas retain earliest completed visits and cap excess in a later 
   assert.deepEqual(result.points.find(point=>point.folio==='2').fulfilledByWeek,[{weekStart:'2026-09-28',fulfilledVisits:1}]);
   for(const point of result.points)assert.equal(timelineSum(point),point.fulfilledVisits);
 });
-test('SOVI contributes one complete measurement per half and never eight component surveys',()=>{
+test('SOVI counts two complete weekly measurements toward the monthly goal even in the same half',()=>{
   const report=[...SOVI.map((study,i)=>visit('1',study,i<4?'2026-09-28':'2026-10-03')),...SOVI.map(study=>visit('1',study,'2026-10-05')),...SOVI.slice(0,7).map(study=>visit('1',study,'2026-10-12')),...SOVI.map(study=>visit('1',study,'2026-10-19'))];
   const result=tracking(SOVI.map(study=>({folio:'1',study})),report),point=result.points[0];
   assert.equal(point.validVisits,3);assert.equal(point.fulfilledVisits,2);assert.equal(point.incompleteWeeks,1);
-  assert.deepEqual(point.fulfilledByWeek,[{weekStart:'2026-09-28',fulfilledVisits:1},{weekStart:'2026-10-19',fulfilledVisits:1}]);
+  assert.deepEqual(point.fulfilledByWeek,[{weekStart:'2026-09-28',fulfilledVisits:1},{weekStart:'2026-10-05',fulfilledVisits:1}]);
   const weekly=summarizeWeeklyProgress(result.points,result.period);
-  assert.deepEqual(weekly.weeks.map(week=>week.fulfilledVisits),[1,0,0,1,0]);assert.equal(weekly.fulfilledVisits,2);
+  assert.deepEqual(weekly.weeks.map(week=>week.fulfilledVisits),[1,1,0,0,0]);assert.equal(weekly.fulfilledVisits,2);
 });
 test('rejected, empty and incomplete SOVI records indicate report coverage without creating progress',()=>{
   const rows=[{folio:'1',study:FACING},...SOVI.map(study=>({folio:'2',study}))];

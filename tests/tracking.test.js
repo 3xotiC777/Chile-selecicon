@@ -62,9 +62,9 @@ test('fixed OSA needs separate completed weeks, not repeated surveys in one week
   const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1')],report:[visit('1',OSA,'2026-09-28'),visit('1',OSA,'2026-09-29'),visit('1',OSA,'2026-10-05')],options});
   const p=point(r,OSA);assert.equal(p.target,4);assert.equal(p.validVisits,3);assert.equal(p.fulfilledVisits,2);assert.equal(p.remaining,2);assert.equal(p.progress,50);assert.equal(p.excessVisits,1);
 });
-test('quincenal cannot be fulfilled by two first-half visits',()=>{
+test('two first-half visits fulfill the monthly quincenal target',()=>{
   const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1','QUINCENALES')],report:[visit('1',OSA,'2026-09-28'),visit('1',OSA,'2026-10-05')],options});
-  const p=point(r,OSA);assert.equal(p.validVisits,2);assert.equal(p.fulfilledVisits,1);assert.equal(p.visitsFirstHalf,2);assert.equal(p.remaining,1);assert.equal(p.complete,false);
+  const p=point(r,OSA);assert.equal(p.validVisits,2);assert.equal(p.fulfilledVisits,2);assert.equal(p.visitsFirstHalf,2);assert.equal(p.visitsSecondHalf,0);assert.equal(p.remaining,0);assert.equal(p.complete,true);assert.equal(p.progress,100);
 });
 test('quincenal completes one in each operational half and caps overcompletion',()=>{
   const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1','QUINCENALES')],report:[visit('1',OSA,'2026-10-05'),visit('1',OSA,'2026-10-12'),visit('1',OSA,'2026-10-19')],options});
@@ -90,18 +90,26 @@ test('seven SOVI studies plus a repeated study does not complete eight',()=>{
 test('SOVI requires all eight flags in the planning denominator',()=>{
   const r=buildTracking({planning:planning(SOVI.slice(0,7).map(study=>({folio:'1',study}))),universe:[u('1')],report:SOVI.map(s=>visit('1',s)),options});assert.equal(r.points.length,0);assert.equal(r.quality.ineligibleSovi,1);assert.equal(r.summary.completedSurveys,8);
 });
-test('SOVI complete twice in first half still needs the second half',()=>{
+test('two complete first-half SOVI measurements fulfill the monthly target',()=>{
   const report=['2026-09-28','2026-10-05'].flatMap(day=>SOVI.map(s=>visit('1',s,day)));
-  const r=buildTracking({planning:planning(SOVI.map(study=>({folio:'1',study}))),universe:[u('1')],report,options});assert.equal(point(r,'SOVI EMBONOR').fulfilledVisits,1);assert.equal(point(r,'SOVI EMBONOR').remaining,1);
+  const r=buildTracking({planning:planning(SOVI.map(study=>({folio:'1',study}))),universe:[u('1')],report,options});assert.equal(point(r,'SOVI EMBONOR').fulfilledVisits,2);assert.equal(point(r,'SOVI EMBONOR').remaining,0);assert.equal(point(r,'SOVI EMBONOR').complete,true);
 });
 test('Facing monthly completed survey counts; rejected and empty stay pending',()=>{
   const r=buildTracking({planning:planning(['1','2'].map(folio=>({folio,study:FACING}))),report:[visit('1','FACING CERVEZAS 2'),visit('2','FACING CERVEZAS 2',undefined,'RECHAZO'),visit('2','FACING CERVEZAS 2',undefined,'VACIO')],options});
   assert.equal(point(r,FACING,'1').complete,true);const p=point(r,FACING,'2');assert.equal(p.remaining,1);assert.equal(p.empty,1);assert.equal(p.rejected,1);assert.equal(p.attempts,2);
 });
-test('Cruz Verde frequency 2 follows halves, frequencies 3 and 4 count monthly quotas',()=>{
+test('Cruz Verde frequencies 2, 3 and 4 use their monthly quotas regardless of half',()=>{
   const rows=['1','2','3'].map(folio=>({folio,study:'QUIEBRES CRUZ VERDE'}));
   const report=['1','2','3'].flatMap(f=>[visit(f,'QUIEBRES CRUZ VERDE'),visit(f,'QUIEBRES CRUZ VERDE','2026-10-01')]);
-  const r=buildTracking({planning:planning(rows),universe:[u('1',2,'CRUZ VERDE'),u('2',3,'CRUZ VERDE'),u('3',4,'CRUZ VERDE')],report,options});assert.equal(point(r,'QUIEBRES CRUZ VERDE','1').fulfilledVisits,1);assert.equal(point(r,'QUIEBRES CRUZ VERDE','2').remaining,1);assert.equal(point(r,'QUIEBRES CRUZ VERDE','3').remaining,2);
+  const r=buildTracking({planning:planning(rows),universe:[u('1',2,'CRUZ VERDE'),u('2',3,'CRUZ VERDE'),u('3',4,'CRUZ VERDE')],report,options});assert.equal(point(r,'QUIEBRES CRUZ VERDE','1').fulfilledVisits,2);assert.equal(point(r,'QUIEBRES CRUZ VERDE','1').remaining,0);assert.equal(point(r,'QUIEBRES CRUZ VERDE','2').remaining,1);assert.equal(point(r,'QUIEBRES CRUZ VERDE','3').remaining,2);
+});
+
+test('monthly completion removes a point from sent-pending counts while preserving its saved planning membership',()=>{
+  const study='EQUIPOS DE FRIO EMBONOR',rows=[{folio:'1',study}];
+  const report=['2026-10-03','2026-10-08'].map(day=>visit('1',study,day));
+  const r=buildTracking({planning:planning(rows),universe:[u('1','QUINCENALES')],report,options:{...options,week:4,start:'2026-10-19',end:'2026-10-24',assignments:[{folio:'1',study,start:'2026-10-19',end:'2026-10-24'}]}});
+  const p=point(r,study);assert.equal(p.complete,true);assert.equal(p.currentWeekCompleted,false);
+  assert.equal(p.plannedCurrentWeek,true);assert.equal(p.plannedPending,false);assert.equal(r.summary.plannedPending,0);
 });
 test('CENCOSUD prices and photographs are independent monthly goals for same enabled points',()=>{
   const r=buildTracking({planning:planning([{folio:'1',study:'CENCOSUD'}]),report:[visit('1','PRECIOS CENCOSUD'),visit('1','PRECIOS CENCOSUD')],options:{...options,assignments:[{folio:'1',study:'CENCOSUD',start:options.start,end:options.end}]}});
@@ -109,7 +117,7 @@ test('CENCOSUD prices and photographs are independent monthly goals for same ena
 });
 test('current planning and current week execution distinguish monthly fulfillment from dispatch',()=>{
   const rows=[{folio:'1',study:FACING},{folio:'2',study:FACING}],report=[visit('1',FACING),visit('2',FACING,'2026-10-06')];
-  const r=buildTracking({planning:planning(rows),report,options:{...options,assignments:rows.map(row=>({...row,start:options.start,end:options.end}))}});assert.equal(point(r,FACING,'1').complete,true);assert.equal(point(r,FACING,'1').plannedPending,true);assert.equal(point(r,FACING,'2').plannedPending,false);
+  const r=buildTracking({planning:planning(rows),report,options:{...options,assignments:rows.map(row=>({...row,start:options.start,end:options.end}))}});assert.equal(point(r,FACING,'1').complete,true);assert.equal(point(r,FACING,'1').plannedPending,false);assert.equal(point(r,FACING,'2').plannedPending,false);
 });
 test('duplicated visit IDs do not inflate progress, productivity or durations',()=>{
   const v=visit('1',FACING),r=buildTracking({planning:planning([{folio:'1',study:FACING}]),report:[v,v],options});assert.equal(r.quality.duplicates,1);assert.equal(r.summary.surveys,1);assert.equal(point(r,FACING).validVisits,1);assert.equal(r.auditors[0].averageMinutes,10);

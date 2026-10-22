@@ -91,13 +91,13 @@ function periodFor(planning,options){
   return {month,week,weeks,start,end,...boundaries,asOf:asOf<operationalEnd?asOf:operationalEnd};
 }
 function targets(study,f){
-  if(study==='SOVI EMBONOR')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Una medición completa de 8 estudios por quincena'};
-  if(FORTNIGHTLY.includes(study))return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Una visita por quincena'};
+  if(study==='SOVI EMBONOR')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos mediciones completas de 8 estudios al mes; idealmente una por quincena'};
+  if(FORTNIGHTLY.includes(study))return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos visitas al mes; idealmente una por quincena'};
   if([OSA,...REPLICAS].includes(study)){
     if(f==='fixed')return {target:WEEKLY_MONTHLY_TARGET,rule:'weekly',frequency:'fija',targetLabel:'Cuatro visitas al mes, en semanas distintas'};
-    if(f==='fortnightly')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Una visita por quincena'};
+    if(f==='fortnightly')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos visitas al mes; idealmente una por quincena'};
   }
-  if(CV.includes(study)&&[2,3,4].includes(f))return {target:f,rule:f===2?'fortnightly':'monthly',frequency:String(f),targetLabel:f===2?'Una visita por quincena':`${f} visitas al mes`};
+  if(CV.includes(study)&&[2,3,4].includes(f))return {target:f,rule:f===2?'fortnightly':'monthly',frequency:String(f),targetLabel:f===2?'Dos visitas al mes; idealmente una por quincena':`${f} visitas al mes`};
   if(study===FACING||MONTHLY.includes(study)||['PRECIOS CENCOSUD','FOTOGRAFIAS CENCOSUD'].includes(study))return {target:1,rule:'monthly',frequency:'mensual',targetLabel:'Una visita al mes'};
   if(['POY','FERIAS LIBRES'].includes(study))return {target:WEEKLY_MONTHLY_TARGET,rule:'weekly',frequency:'semanal',targetLabel:'Cuatro visitas al mes, en semanas distintas'};
   return {target:null,rule:'unknown',frequency:f??'sin frecuencia',targetLabel:'Meta sin frecuencia válida'};
@@ -217,13 +217,12 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
       if(incompleteWeeks)quality.incompleteSovi++;
     }
     if(goal.target===null)quality.missingFrequencies++;
-    const fulfilledByWeek=creditedWeeks(completedByWeek,goal,period);
+    const fulfilledByWeek=creditedWeeks(completedByWeek,goal);
     const fulfilledVisits=fulfilledByWeek.reduce((sum,entry)=>sum+entry.fulfilledVisits,0);
-    const recoveredInClosing=goal.rule==='fortnightly'?Math.max(0,fulfilledVisits-Math.min(1,visitsFirstHalf)-Math.min(1,visitsSecondHalf)):0;
     const remaining=goal.target===null?null:Math.max(0,goal.target-fulfilledVisits),complete=goal.target!==null&&remaining===0,plan=planned.get(pKey);
     const status=complete?'complete':fulfilledVisits>0?'partial':metric.rejected>0?'rejected':metric.empty>0?'empty':'pending';
     const weekStates=[...(weeklyStates.get(pKey)?.values()||[])].sort((a,b)=>sorted(a.weekStart,b.weekStart)).map(entry=>({...entry,otherStatuses:[...entry.otherStatuses].sort(sorted),completedVisits:completedByWeek.get(entry.weekStart)||0,completedStudies:study==='SOVI EMBONOR'?(soviWeeks.get(row.folio)?.get(entry.weekStart)?.size||0):null}));
-    points.push({folio:row.folio,client,study,studyId:study==='SOVI EMBONOR'?null:row.studyId||null,auditor:row.auditor,auditorName:row.auditorName,coordinator:row.coordinator||'',office:row.office||'',measurementDay:row.measurementDay||'',location:row.location||row.address||'',address:row.address||'',region:row.region||'',commune:row.commune||'',chain:row.chain||'',...goal,...planningInfo(row.folio,study),weekStates,validVisits,fulfilledVisits,fulfilledByWeek,recoveredInClosing,remaining,progress:percent(fulfilledVisits,goal.target),visitsFirstHalf,visitsSecondHalf,weeklyVisits,empty:metric.empty,rejected:metric.rejected,other:metric.other,undatedEmpty:metric.undatedEmpty||0,undatedRejected:metric.undatedRejected||0,attempts:metric.attempts,lastVisit:metric.lastVisit,plannedCurrentWeek:!!plan,plannedWeekStart:plan?.start||null,plannedWeekEnd:plan?.end||null,currentWeekCompleted,plannedPending:!!plan&&!currentWeekCompleted,incompleteWeeks,partialSovi,complete,status,excessVisits:Math.max(0,validVisits-fulfilledVisits)});
+    points.push({folio:row.folio,client,study,studyId:study==='SOVI EMBONOR'?null:row.studyId||null,auditor:row.auditor,auditorName:row.auditorName,coordinator:row.coordinator||'',office:row.office||'',measurementDay:row.measurementDay||'',location:row.location||row.address||'',address:row.address||'',region:row.region||'',commune:row.commune||'',chain:row.chain||'',...goal,...planningInfo(row.folio,study),weekStates,validVisits,fulfilledVisits,fulfilledByWeek,remaining,progress:percent(fulfilledVisits,goal.target),visitsFirstHalf,visitsSecondHalf,weeklyVisits,empty:metric.empty,rejected:metric.rejected,other:metric.other,undatedEmpty:metric.undatedEmpty||0,undatedRejected:metric.undatedRejected||0,attempts:metric.attempts,lastVisit:metric.lastVisit,plannedCurrentWeek:!!plan,plannedWeekStart:plan?.start||null,plannedWeekEnd:plan?.end||null,currentWeekCompleted,plannedPending:!!plan&&!complete&&!currentWeekCompleted,incompleteWeeks,partialSovi,complete,status,excessVisits:Math.max(0,validVisits-fulfilledVisits)});
   }
   points.sort((a,b)=>sorted(a.client,b.client)||sorted(a.study,b.study)||sorted(a.auditorName,b.auditorName)||sorted(a.folio,b.folio));
   const daily=[...dailyMap.values()].map(d=>({...d,minutes:Math.round(d.minutes*10000)/10000})).sort((a,b)=>sorted(a.day,b.day)||sorted(a.auditor,b.auditor)||sorted(a.study,b.study));

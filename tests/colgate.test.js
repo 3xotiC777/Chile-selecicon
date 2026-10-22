@@ -77,7 +77,7 @@ test('Colgate week 4 includes failed week 3 visits, and week 5 retries only the 
   for(const study of FORTNIGHTLY)assert.deepEqual(selected(fifth,study),['5']);
 });
 
-test('Colgate tracking and weekly graph require one TERMINADO in each half; repeated first-half surveys do not fulfill the second',()=>{
+test('Colgate tracking and weekly graph credit the first two monthly visits regardless of half',()=>{
   const input=fixture(2);
   input.report=studies.flatMap(study=>[visit(study,1,'2026-09-28'),visit(study,1,'2026-10-05'),visit(study,1,'2026-10-12'),visit(study,2,'2026-09-29'),visit(study,3,'2026-10-01','VACIO'),visit(study,3,'2026-10-13','RECHAZADO')]);
   const tracking=buildTracking(input);
@@ -89,7 +89,7 @@ test('Colgate tracking and weekly graph require one TERMINADO in each half; repe
     assert.equal(failed.fulfilledVisits,0);assert.equal(failed.remaining,2);assert.equal(failed.empty,1);assert.equal(failed.rejected,1);
     const graph=summarizeWeeklyProgress(points,tracking.period);
     assert.equal(graph.target,18);assert.equal(graph.fulfilledVisits,3);
-    assert.deepEqual(graph.weeks.map(week=>week.fulfilledVisits),[2,0,1,0,0]);
+    assert.deepEqual(graph.weeks.map(week=>week.fulfilledVisits),[2,1,0,0,0]);
   }
   const monthly=tracking.points.filter(point=>point.study===exhibitions);
   assert(monthly.every(point=>point.target===1&&point.frequency==='mensual'));
@@ -107,5 +107,5 @@ test('Colgate second-half opening prioritizes unvisited points over rotating tie
     const pending=result.decisions.find(row=>row.study===study&&row.folio==='2');
     assert.equal(pending.visitsFirstHalf,0);assert.equal(pending.visitsSecondHalf,0);
   }
-  assert(result.warnings.some(warning=>warning.includes('no completaron la primera quincena')));
+  assert(result.warnings.some(warning=>warning.includes('no tienen medición en la primera quincena')));
 });

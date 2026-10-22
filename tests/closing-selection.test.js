@@ -92,7 +92,7 @@ test('closing ignores holiday reductions for every pending fixed point and exclu
   }
 });
 
-test('final-week fortnightly recovery is credited consistently in dashboard, graph and Excel, without changing prior weeks',()=>{
+test('a second monthly measurement in the closing week agrees across dashboard, graph and Excel',()=>{
   for(const weeks of [4,5]){
     const input=fixture(weeks,weeks),closing=starts[weeks-1];
     input.universe.filter(row=>row.client==='EMBONOR').forEach(row=>row.frequency='QUINCENALES');
@@ -103,7 +103,7 @@ test('final-week fortnightly recovery is credited consistently in dashboard, gra
     for(const study of [...studies,...SOVI])assert(folios(result,study).includes('001'),study);
     input.report.push(...result.files.flatMap(file=>file.rows).filter(row=>row.folio==='001').map(row=>visit(row.study,row.folio,closing)));
     const after=buildTracking(input),points=after.points.filter(p=>p.folio==='001'&&p.rule==='fortnightly');
-    assert(points.every(p=>p.complete&&p.fulfilledVisits===2&&p.visitsFirstHalf===0&&p.recoveredInClosing===1));
+    assert(points.every(p=>p.complete&&p.fulfilledVisits===2&&p.visitsFirstHalf===0&&p.visitsSecondHalf===2));
     const timeline=summarizeWeeklyProgress(points,after.period);assert.equal(timeline.weeks.at(-1).fulfilledVisits,points.length);assert.equal(timeline.weeks.at(-1).cumulativeProgress,100);
     for(const model of progressSheets(points,after.period)){
       const done=model.columns.findIndex(([key])=>key==='fulfilledVisits');assert(model.rows.every(row=>row[done]===2));
@@ -147,19 +147,38 @@ test('canonical and customized export names count weekly visits without requirin
   assert.deepEqual(folios(select(input),'POY'),['003']);
 });
 
-test('closing does not treat two first-half surveys as a completed monthly distribution',()=>{
-  const input=fixture();input.universe.filter(row=>row.client==='EMBONOR').forEach(row=>row.frequency='QUINCENALES');
-  for(const study of [OSA,...REPLICAS,...SOVI,...FORTNIGHTLY,...CV])addWeeks(input,study,'001',starts.slice(0,2));
-  const result=select(input);
-  for(const study of [OSA,...REPLICAS,...SOVI,...FORTNIGHTLY,...CV])assert(folios(result,study).includes('001'),study);
-  input.report.push(...result.files.flatMap(file=>file.rows).filter(r=>r.folio==='001').map(r=>visit(r.study,r.folio,starts[4])));
-  const tracking=buildTracking(input);
-  assert(tracking.points.filter(p=>p.folio==='001'&&p.rule==='fortnightly').every(p=>p.complete&&p.fulfilledVisits===2));
+test('two first-half measurements fulfill the monthly goal and are excluded from every later selection',()=>{
+  for(const week of [3,4,5]){
+    const input=fixture(week);input.universe.filter(row=>row.client==='EMBONOR').forEach(row=>row.frequency='QUINCENALES');
+    for(const study of [OSA,...REPLICAS,...SOVI,...FORTNIGHTLY,...CV])addWeeks(input,study,'001',starts.slice(0,2));
+    const result=select(input);
+    for(const study of [OSA,...REPLICAS,...SOVI,...FORTNIGHTLY,...CV])assert(!folios(result,study).includes('001'),study);
+    const tracking=buildTracking(input),points=tracking.points.filter(p=>p.folio==='001'&&p.rule==='fortnightly');
+    assert(points.every(p=>p.complete&&p.fulfilledVisits===2&&p.remaining===0&&p.visitsFirstHalf===2&&p.visitsSecondHalf===0));
+    assert.equal(summarizeWeeklyProgress(points,tracking.period).weeks[1].cumulativeProgress,100);
+  }
 });
 
 test('one closing SOVI measurement stays one even with duplicated component surveys',()=>{
   const input=fixture();
   for(const study of SOVI){input.report.push(visit(study,'001',starts[4]));input.report.push(visit(study,'001','2026-10-27'));}
   const tracking=buildTracking(input),point=tracking.points.find(p=>p.folio==='001'&&p.study==='SOVI EMBONOR');
-  assert.equal(point.validVisits,1);assert.equal(point.fulfilledVisits,1);assert.equal(point.remaining,1);assert.equal(point.recoveredInClosing,0);
+  assert.equal(point.validVisits,1);assert.equal(point.fulfilledVisits,1);assert.equal(point.remaining,1);
+});
+
+test('a completed quincenal replica is excluded in a normal week even when its OSA is still pending',()=>{
+  const input=fixture(3);input.universe.filter(row=>row.client==='EMBONOR').forEach(row=>row.frequency='QUINCENALES');
+  const study='EQUIPOS DE FRIO EMBONOR';addWeeks(input,study,'001',['2026-10-03','2026-10-08']);
+  const result=select(input);assert(folios(result,OSA).includes('001'));assert(!folios(result,study).includes('001'));
+  assert.equal(result.decisions.find(row=>row.folio==='001'&&row.study===study).reason,'Cuota mensual cumplida');
+});
+
+test('two distinct same-week ordinary visits meet the monthly goal while duplicates and failures do not add credit',()=>{
+  const input=fixture(4),study=FORTNIGHTLY[0];
+  const first=visit(study,'001','2026-10-13');
+  input.report.push(first,first,visit(study,'001','2026-10-14'),visit(study,'001','2026-10-15','VACIO'),visit(study,'001','2026-10-16','RECHAZO'));
+  const tracking=buildTracking(input),point=tracking.points.find(p=>p.folio==='001'&&p.study===study);
+  assert.equal(point.validVisits,2);assert.equal(point.fulfilledVisits,2);assert.equal(point.remaining,0);assert.equal(point.visitsSecondHalf,2);
+  assert.deepEqual(point.fulfilledByWeek,[{weekStart:'2026-10-12',fulfilledVisits:2}]);
+  assert(!folios(select(input),study).includes('001'));
 });

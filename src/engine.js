@@ -126,7 +126,7 @@ export function buildHistory(report, {month,start,end,aliases,week=suggestPeriod
     weeklyCount:(study,folio)=>studyWeeks.get(JSON.stringify([study,folio]))?.size||0,
     fortnightFulfilled:(study,folio)=>creditedWeeks(
       study==='SOVI EMBONOR'?new Map([...(soviWeeks.get(folio)||[])].filter(([,names])=>names.size===8).map(([wk])=>[wk,1])):studyWeeks.get(JSON.stringify([study,folio]))||new Map(),
-      {rule:'fortnightly',target:2},{...boundaries,weeks}
+      {rule:'fortnightly',target:2}
     ).reduce((sum,entry)=>sum+entry.fulfilledVisits,0),
     halfCount:(study,folio,half)=>halfTotals.get(JSON.stringify([study,folio,half]))||0,
     soviCount:folio=>sovi.get(folio)||0,
@@ -293,7 +293,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     for(const r of rows(s)){
       const isFixed=freq(r)==='fixed',v=isFixed?history.weeklyCount(s,r.folio):history.count(s,r.folio);
       const pending=isFixed?v<WEEKLY_MONTHLY_TARGET:history.fortnightFulfilled(s,r.folio)<2;
-      const yes=last?pending:osa.has(r.folio)&&(!isFixed||pending);
+      const yes=pending&&(last||osa.has(r.folio));
       if(!last&&yes&&r.auditor!==byStudy.get(OSA).get(r.folio).auditor)fail(`Auditor inconsistente para el folio ${r.folio} en ${s}.`);
       decide(r,yes,v,last?(yes?'Cierre de mes: estudio pendiente; no requiere OSA':'Cuota mensual cumplida'):!pending?'Cuota mensual cumplida':yes?'Replica la selección OSA':'No seleccionado en OSA');
     }
@@ -327,7 +327,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     const owner=byStudy.get(last?SOVI[0]:OSA)?.get(r.folio);
     if(sovi.has(r.folio)&&owner&&r.auditor!==owner.auditor)fail(`Auditor inconsistente para el folio ${r.folio} en ${s}.`);
     const all=SOVI.every(n=>byStudy.get(n)?.has(r.folio)),yes=sovi.has(r.folio);
-    decide(r,yes,history.soviCount(r.folio),!all?'No habilitado en los ocho SOVI':last?(yes?'Cierre de mes: medición SOVI pendiente; no requiere OSA':'Cuota mensual cumplida'):!osa.has(r.folio)?'No seleccionado en OSA':fortnightReason(yes,history.soviCount(r.folio),history.soviHalfCount(r.folio,half),week));
+    decide(r,yes,history.soviCount(r.folio),!all?'No habilitado en los ocho SOVI':history.soviCount(r.folio)>=2?'Cuota mensual cumplida':last?(yes?'Cierre de mes: medición SOVI pendiente; no requiere OSA':'Cuota mensual cumplida'):!osa.has(r.folio)?'No seleccionado en OSA':fortnightReason(yes,history.soviCount(r.folio),history.soviHalfCount(r.folio,half),week));
   }
   let facingExceptions=0;
   for(const r of rows(FACING)){
@@ -341,9 +341,9 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   const soviBaseFolios=new Set(soviBase.map(r=>r.folio));
   const audited=decisions.filter(r=>r.visitsFirstHalf!==null&&(!SOVI.includes(r.study)||r.study===SOVI[0]&&soviBaseFolios.has(r.folio)));
   const repeated=audited.filter(r=>r.visitsFirstHalf>1||r.visitsSecondHalf>1);
-  if(repeated.length)warnings.push(`${repeated.length} combinaciones de punto y estudio ya tienen más de una medición en una misma quincena. El cumplimiento se limita a dos; el cierre puede programar una medición pendiente. Consulta los conteos por quincena en el detalle.`);
-  const missed=audited.filter(r=>week>=3&&r.visitsFirstHalf===0);
-  if(missed.length)warnings.push(`${missed.length} combinaciones de punto y estudio no completaron la primera quincena. La última semana permite recuperar su cuota mensual con mediciones nuevas; el detalle conserva el conteo real de cada quincena.`);
+  if(repeated.length)warnings.push(`${repeated.length} combinaciones de punto y estudio tienen más de una medición en una misma quincena. Ambas cuentan para la meta mensual de dos; los completados no se vuelven a programar. El reparto por quincenas es una preferencia de planeación.`);
+  const missed=audited.filter(r=>week>=3&&r.visitsFirstHalf===0&&r.visits<2);
+  if(missed.length)warnings.push(`${missed.length} combinaciones de punto y estudio no tienen medición en la primera quincena y aún no completan la meta mensual de dos. El cierre programa sus pendientes; el detalle conserva el conteo real de cada quincena.`);
   const files=[];
   for(const s of planning.studies){
     if(SOVI.includes(s.name))continue;
