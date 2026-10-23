@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import {gzipSync,strToU8} from 'fflate';
 
 const env = import.meta.env || {};
 const defaultUrl = env.VITE_SUPABASE_URL || '';
@@ -54,7 +55,10 @@ export function validateSave({ month, planning, universe, report, selection, rev
 }
 
 /** Publishable client only: SQL RLS controls access and the server controls user management. */
-export function createCloud({ url = defaultUrl, key = defaultKey, client } = {}) {
+export function createCloud({ url = defaultUrl, key = defaultKey, client,
+  saveEndpoint = env.PROD && globalThis.location?.hostname?.endsWith('.vercel.app') ? '/api/save-planning' : null,
+  fetchImpl = (...args)=>fetch(...args),
+} = {}) {
   if (!client && (!url || !key)) return null;
   const supabase = client || createClient(url, key, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'chile-field-session' },
@@ -124,12 +128,43 @@ export function createCloud({ url = defaultUrl, key = defaultKey, client } = {})
     },
     async saveWorkspace(input,{reload=true}={}) {
       validateSave(input);
-      const receipt=checked(await supabase.rpc('chile_save_workspace', {
+      const confirmSelection=async()=>{
+        const requestId=input.metadata?.saveRequestId;
+        if(!input.selection||!requestId)return null;
+        const plan=checked(await supabase.from('chile_weekly_plans').select('metadata').eq('month',input.month).eq('week',input.selection.period.week).maybeSingle());
+        if(plan?.metadata?.saveRequestId!==requestId)return null;
+        const head=checked(await supabase.from('chile_workspace').select('active_month,revision').eq('id',true).maybeSingle());
+        return head?.active_month===input.month&&head.revision>input.revision?{month:input.month,revision:head.revision,recovered:true}:null;
+      };
+      const write=async()=>{
+        if(saveEndpoint){
+          const {session}=checked(await supabase.auth.getSession());
+          if(!session)throw new CloudError('Inicia sesión para guardar.','UNAUTHORIZED');
+          const body=gzipSync(strToU8(JSON.stringify(input)),{level:6});
+          if(body.length>4*1024*1024)throw new CloudError('El guardado comprimido excede 4 MB. Reduce el export al mes activo.','PAYLOAD_LIMIT');
+          const response=await fetchImpl(saveEndpoint,{method:'POST',headers:{Authorization:`Bearer ${session.access_token}`,'Content-Type':'application/octet-stream','X-Chile-Payload':'gzip'},body,cache:'no-store',signal:AbortSignal.timeout(50000)});
+          const data=await response.json().catch(()=>null);
+          if(!response.ok||!data)throw new CloudError(data?.error||'El servidor no confirmó el guardado. Reintenta sin cambiar la selección.',data?.code||'SAVE_FAILED');
+          return data;
+        }
+        return checked(await supabase.rpc('chile_save_workspace', {
         p_month: input.month, p_expected_revision: input.revision,
         p_planning: input.planning ?? null, p_universe: input.universe ?? null,
         p_report: input.report ?? null, p_selection: input.selection ?? null,
         p_metadata: input.metadata || {},
-      }));
+        }));
+      };
+      // Read back this exact request after a lost response, and before a manual
+      // retry. A different week's save or another administrator's save is not proof.
+      let receipt;
+      try{receipt=await confirmSelection();}catch{/* The write still enforces its expected revision. */}
+      if(!receipt){
+        try{receipt=await write();}
+        catch(error){
+          try{receipt=await confirmSelection();}catch{/* Preserve the original write error. */}
+          if(!receipt)throw error instanceof CloudError?error:new CloudError('Se interrumpió la conexión al guardar. Reintenta sin cambiar la selección.','NETWORK_ERROR');
+        }
+      }
       // A successful RPC response confirms the transaction. Reading every saved
       // ZIP again is not part of that write and can independently time out.
       if(!reload){

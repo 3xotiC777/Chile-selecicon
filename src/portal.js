@@ -114,6 +114,7 @@ export function initPortal({runWorker,onWorkspace,resetSelection}){
   async function saveSelection(draft){
     if(!admin())throw new Error('Solo el administrador puede guardar una planeación.');
     if(!draft)throw new Error('Genera de nuevo la selección antes de guardar.');
+    draft.saveRequestId??=crypto.randomUUID();
     const input=selectionSaveInput(draft,workspace),{month,selection}=input;
     const changed=workspace?.month&&workspace.month!==month;
     if(changed&&!confirm(`Guardar ${month} reemplazará el seguimiento y los ZIP de ${workspace.month}. Ya revisaste la nueva selección. ¿Iniciar el mes ${month}?`))throw new Error('Se canceló el cambio de mes. La selección sigue disponible para descargar.');
