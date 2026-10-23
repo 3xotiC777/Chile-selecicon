@@ -24,6 +24,6 @@ export function selectionSaveInput(draft,workspace){
     planning:unchangedPlanning?null:planning,
     universe:sameMonth&&sameData(draft.universe,workspace.universe)?null:draft.universe,
     report:sameMonth&&sameData(report,workspace.report)?null:report,
-    metadata:{...draft.metadata,options:{...draft.options,...selection.period,aliases:{...TRACKING_ALIASES,...draft.options.aliases}},selectionOrigin:'Guardada por el administrador'},
+    metadata:{...draft.metadata,...(draft.saveRequestId?{saveRequestId:draft.saveRequestId}:{}),options:{...draft.options,...selection.period,aliases:{...TRACKING_ALIASES,...draft.options.aliases}},selectionOrigin:'Guardada por el administrador'},
   };
 }

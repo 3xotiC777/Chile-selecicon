@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCloud, validateSave, workspaceFromRows, CloudError } from '../src/cloud.js';
+import {gunzipSync} from 'node:zlib';
 
 const planning = { rows: [{ folio: '1' }], studies: [{ name: 'POY' }] };
 const selection = { period: { month: '2026-10', week: 1 }, files: [{ name: 'POY.csv', rows: [] }] };
@@ -79,6 +80,38 @@ test('a confirmed write does not depend on downloading the full workspace again'
 test('a database statement timeout is never treated as a confirmed save',async()=>{
   const {client}=fakeClient({rpcError:{code:'57014',message:'canceling statement due to statement timeout'}});
   await assert.rejects(()=>createCloud({client}).saveWorkspace({month:'2026-10',revision:2,selection},{reload:false}),error=>error.code==='57014');
+});
+
+test('Vercel saves a compressed body through the same-origin endpoint using only the session bearer',async()=>{
+  const{client,calls}=fakeClient();let request;
+  const input={month:'2026-10',revision:2,selection};
+  const cloud=createCloud({client,saveEndpoint:'/api/save-planning',fetchImpl:async(url,options)=>{request={url,...options};return{ok:true,json:async()=>({month:input.month,revision:3})};}});
+  assert.equal((await cloud.saveWorkspace(input,{reload:false})).revision,3);
+  assert.equal(request.url,'/api/save-planning');assert.equal(request.headers.Authorization,'Bearer session-token');
+  assert.equal(request.headers['X-Chile-Payload'],'gzip');assert.equal(request.cache,'no-store');
+  assert.deepEqual(JSON.parse(gunzipSync(request.body)),input);assert.equal(calls.some(c=>c[0]==='rpc'),false);
+});
+
+test('a failed relay never falls back to another write or claims confirmation from an older plan',async()=>{
+  const{client,calls}=fakeClient();
+  const cloud=createCloud({client,saveEndpoint:'/api/save-planning',fetchImpl:async()=>{throw new TypeError('Failed to fetch');}});
+  await assert.rejects(()=>cloud.saveWorkspace({month:'2026-10',revision:2,selection,metadata:{saveRequestId:'new'}},{reload:false}),e=>e.code==='NETWORK_ERROR');
+  assert.equal(calls.some(c=>c[0]==='rpc'),false);
+});
+
+test('a lost write response is recovered only from the exact saved request and same active month',async()=>{
+  for(const month of ['2026-10','2026-11']){
+    let persisted=false,writes=0;
+    const{client}=fakeClient();
+    client.from=table=>({select(){return this;},eq(){return this;},async maybeSingle(){return{data:table==='chile_weekly_plans'?(persisted?{metadata:{saveRequestId:'exact-request'}}:null):{active_month:month,revision:3}};}});
+    const cloud=createCloud({client,saveEndpoint:'/api/save-planning',fetchImpl:async()=>{writes++;persisted=true;throw new TypeError('connection lost after commit');}});
+    const input={month:'2026-10',revision:2,selection,metadata:{saveRequestId:'exact-request'}};
+    if(month==='2026-10'){
+      assert.equal((await cloud.saveWorkspace(input,{reload:false})).recovered,true);
+      assert.equal((await cloud.saveWorkspace(input,{reload:false})).recovered,true);
+      assert.equal(writes,1,'a retry of the confirmed request must not write again');
+    }else await assert.rejects(()=>cloud.saveWorkspace(input,{reload:false}),e=>e.code==='NETWORK_ERROR');
+  }
 });
 
 test('a missing or stale RPC receipt cannot claim success',async()=>{
