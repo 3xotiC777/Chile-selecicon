@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {buildTracking} from '../src/tracking.js';
 import {summarizeWeeklyProgress} from '../src/weekly-progress.js';
 import {OSA,REPLICAS,FACING,SOVI} from '../src/engine.js';
+import {progressSheets} from '../src/tracking-export.js';
 
 const options={month:'2026-10',week:2,weeks:5,start:'2026-10-05',end:'2026-10-10',monthRange:{start:'2026-09-28',end:'2026-10-31'}};
 const planning=rows=>({studies:[...new Set(rows.map(row=>row.study))].map(name=>({name,start:options.start,end:options.end})),rows:rows.map(row=>({auditor:'1',auditorName:'Ana',...row}))});
@@ -11,28 +12,44 @@ const visit=(folio,study,day,status='TERMINADO',extra={})=>({folio,study,day,sta
 const tracking=(rows,report,universe=[],overrides={})=>buildTracking({planning:planning(rows),report,universe,options:{...options,...overrides}});
 const timelineSum=point=>point.fulfilledByWeek.reduce((sum,entry)=>sum+entry.fulfilledVisits,0);
 
-test('all weekly studies have a four-visit monthly goal in both four- and five-week months',()=>{
+test('fixed Embonor targets follow field weeks while POY and Ferias retain four visits',()=>{
   const studies=[OSA,...REPLICAS,'POY','FERIAS LIBRES'];
   const rows=studies.map(study=>({folio:'1',study}));
   const days=['2026-09-28','2026-10-05','2026-10-12','2026-10-19','2026-10-26'];
   for(const weeks of [4,5]){
     const result=tracking(rows,studies.flatMap(study=>days.map(day=>visit('1',study,day))),[{client:'EMBONOR',folio:'1',frequency:'FIJA'}],{weeks});
     for(const point of result.points){
-      assert.equal(point.target,4);assert.equal(point.validVisits,5);
-      assert.equal(point.fulfilledVisits,4);assert.equal(point.remaining,0);assert.equal(point.progress,100);
-      assert.equal(point.complete,true);assert.equal(timelineSum(point),4);
+      const target=[OSA,...REPLICAS].includes(point.study)?weeks:4;
+      assert.equal(point.target,target);assert.equal(point.validVisits,5);
+      assert.equal(point.fulfilledVisits,target);assert.equal(point.remaining,0);assert.equal(point.progress,100);
+      assert.equal(point.complete,true);assert.equal(timelineSum(point),target);
       assert.equal(point.weekStates.length,5);assert.equal(point.weekStates[4].completedVisits,1);
     }
     const series=summarizeWeeklyProgress(result.points,result.period);
-    assert.equal(series.target,studies.length*4);assert.equal(series.weeks[4].fulfilledVisits,0);
+    assert.equal(series.target,6*weeks+2*4);assert.equal(series.weeks[4].fulfilledVisits,weeks===5?6:0);
     assert.equal(series.weeks[4].cumulativeProgress,100);
   }
 });
 
-test('a missed weekly visit can be completed in week five without requiring a fifth visit',()=>{
+test('four completed Embonor weeks in a five-week month remain at eighty percent with one pending visit',()=>{
   const result=tracking([{folio:'1',study:OSA}],['2026-09-28','2026-10-05','2026-10-19','2026-10-26'].map(day=>visit('1',OSA,day)),[{client:'EMBONOR',folio:'1',frequency:'FIJA'}]);
-  const point=result.points[0];assert.equal(point.target,4);assert.equal(point.complete,true);assert.equal(point.remaining,0);
+  const point=result.points[0];assert.equal(point.target,5);assert.equal(point.complete,false);assert.equal(point.remaining,1);assert.equal(point.progress,80);
   assert.deepEqual(summarizeWeeklyProgress(result.points,result.period).weeks.map(week=>week.fulfilledVisits),[1,1,0,1,1]);
+});
+
+test('the fifth fixed Embonor visit completes dashboard, filtered graph and downloadable progress together',()=>{
+  const studies=[OSA,...REPLICAS],rows=studies.map(study=>({folio:'1',study}));
+  const days=['2026-09-28','2026-10-05','2026-10-12','2026-10-19'];
+  const report=studies.flatMap(study=>days.map(day=>visit('1',study,day))),universe=[{client:'EMBONOR',folio:'1',frequency:'FIJA'}];
+  for(const completed of [false,true]){
+    const current=completed?[...report,...studies.map(study=>visit('1',study,'2026-10-26'))]:report;
+    const result=tracking(rows,current,universe),filtered=result.points.filter(point=>point.study===OSA);
+    assert(result.points.every(point=>point.target===5&&point.fulfilledVisits===(completed?5:4)&&point.remaining===(completed?0:1)&&point.complete===completed));
+    const series=summarizeWeeklyProgress(filtered,result.period);
+    assert.equal(series.target,5);assert.equal(series.weeks[4].fulfilledVisits,completed?1:0);assert.equal(series.weeks[4].cumulativeProgress,completed?100:80);
+    const sheet=progressSheets(filtered,result.period)[0],value=key=>sheet.rows[0][sheet.columns.findIndex(([name])=>name===key)];
+    assert.equal(value('target'),5);assert.equal(value('remaining'),completed?0:1);assert.equal(value('progress'),completed?1:.8);
+  }
 });
 
 test('weekly fixed quotas count each week once, removing duplicates and same-week excess',()=>{

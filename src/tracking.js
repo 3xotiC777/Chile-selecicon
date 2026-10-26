@@ -90,11 +90,11 @@ function periodFor(planning,options){
   const asOf=isoDate(options.asOf)||operationalEnd;
   return {month,week,weeks,start,end,...boundaries,asOf:asOf<operationalEnd?asOf:operationalEnd};
 }
-function targets(study,f){
+function targets(study,f,weeks){
   if(study==='SOVI EMBONOR')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos mediciones completas de 8 estudios al mes; idealmente una por quincena'};
   if(FORTNIGHTLY.includes(study))return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos visitas al mes; idealmente una por quincena'};
   if([OSA,...REPLICAS].includes(study)){
-    if(f==='fixed')return {target:WEEKLY_MONTHLY_TARGET,rule:'weekly',frequency:'fija',targetLabel:'Cuatro visitas al mes, en semanas distintas'};
+    if(f==='fixed')return {target:weeks,rule:'weekly',frequency:'fija',targetLabel:`${weeks} visitas al mes, en semanas distintas`};
     if(f==='fortnightly')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos visitas al mes; idealmente una por quincena'};
   }
   if(CV.includes(study)&&[2,3,4].includes(f))return {target:f,rule:f===2?'fortnightly':'monthly',frequency:String(f),targetLabel:f===2?'Dos visitas al mes; idealmente una por quincena':`${f} visitas al mes`};
@@ -203,7 +203,7 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
     const study=consolidatedStudy(row.study),pKey=key(study,row.folio);if(pointKeys.has(pKey))continue;pointKeys.add(pKey);
     if(study==='SOVI EMBONOR'&&!SOVI.every(s=>master.has(key(s,row.folio)))){quality.ineligibleSovi++;continue;}
     const client=clientFor(row.study,row.client),f=freqMap.get(key(CV.includes(row.study)?'CRUZ VERDE':'EMBONOR',row.folio))??frequency(row.frequency);
-    const goal=targets(study,f),metric=aggregates.get(pKey)||{valid:0,empty:0,rejected:0,other:0,attempts:0,firstHalf:0,secondHalf:0,weeks:new Set(),completedByWeek:new Map(),lastVisit:null,currentWeekValid:0};
+    const goal=targets(study,f,period.weeks),metric=aggregates.get(pKey)||{valid:0,empty:0,rejected:0,other:0,attempts:0,firstHalf:0,secondHalf:0,weeks:new Set(),completedByWeek:new Map(),lastVisit:null,currentWeekValid:0};
     let validVisits=metric.valid,visitsFirstHalf=metric.firstHalf,visitsSecondHalf=metric.secondHalf,weeklyVisits=metric.weeks.size,currentWeekCompleted=metric.currentWeekValid>0,incompleteWeeks=0;
     let completedByWeek=metric.completedByWeek;
     const partialSovi=[];
@@ -233,7 +233,8 @@ export function buildTracking({planning,universe=[],report=[],options={}}){
   if(quality.unknownStudies)warnings.push(`${quality.unknownStudies} registros pertenecen a estudios sin meta configurada: ${quality.unknownStudyNames.join(', ')}. Los registros con fecha se incluyen en productividad; no se inventa una meta mensual.`);
   if(quality.unplannedPoints)warnings.push(`${quality.unplannedPoints} registros del export no corresponden a un punto habilitado de ese estudio en el último RETAIL. No se agregan al universo de metas; los registros con fecha sí se conservan en productividad.`);
   if((planning.rows||[]).some(r=>normalize(r.study)==='CENCOSUD'))warnings.push('CENCOSUD muestra PRECIOS CENCOSUD y FOTOGRAFIAS CENCOSUD como dos estudios mensuales independientes sobre los puntos habilitados de CENCOSUD en RETAIL.');
-  if(points.some(point=>point.rule==='weekly'))warnings.push('Los puntos semanales tienen una meta de cuatro visitas mensuales, incluso en meses con cinco semanas. Cada semana terminada cuenta una vez, hasta cumplir cuatro.');
+  if(points.some(point=>point.rule==='weekly'&&[OSA,...REPLICAS].includes(point.study)))warnings.push(`Las fijas de Embonor tienen una meta de ${period.weeks} visitas mensuales, una por semana de campo. Cada semana con TERMINADO cuenta una sola vez.`);
+  if(points.some(point=>['POY','FERIAS LIBRES'].includes(point.study)))warnings.push('POY y Ferias Libres conservan una meta de cuatro visitas mensuales, en semanas distintas.');
   return {period:{...period,lastReportDay},...summarizeTracking(points,daily),points,daily,quality,warnings};
 }
 
