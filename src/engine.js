@@ -273,7 +273,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     decide(r,yes,v,yes?`Semanal pendiente: ${v}/${WEEKLY_MONTHLY_TARGET}`:'Cuatro visitas semanales completadas; no repetir');
   }
   const osaRows=rows(OSA),fixed=osaRows.filter(r=>freq(r)==='fixed');
-  const fixedPending=fixed.filter(r=>history.weeklyCount(OSA,r.folio)<WEEKLY_MONTHLY_TARGET);
+  const fixedPending=fixed.filter(r=>history.weeklyCount(OSA,r.folio)<weeks);
   const fixedTarget=Math.round(fixedPending.length*(1-.17*(last?0:holidays)));
   const osaQuincenal=osaRows.filter(r=>freq(r)==='fortnightly');
   const osaFortnight=chooseFortnight(osaQuincenal,osaQuincenal,f=>last?history.fortnightFulfilled(OSA,f):history.count(OSA,f),(f,h)=>last?0:history.halfCount(OSA,f,h),last?4:week);
@@ -282,7 +282,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   for(const r of osaRows){
     const isFixed=freq(r)==='fixed',v=isFixed?history.weeklyCount(OSA,r.folio):history.count(OSA,r.folio);
     const yes=isFixed?fixedChosen.has(r.folio):osaFortnight.chosen.has(r.folio);
-    decide(r,yes,v,isFixed?(v>=WEEKLY_MONTHLY_TARGET?'Cuatro visitas semanales completadas; no repetir':yes?'Fija semanal pendiente; prioridad por visitas y carga del auditor':'Ajuste por feriado; prioridad por visitas y carga del auditor'):last?(yes?'Cierre de mes: medición mensual pendiente':'Cuota mensual cumplida'):fortnightReason(yes,v,history.halfCount(OSA,r.folio,half),week));
+    decide(r,yes,v,isFixed?(v>=weeks?`Meta semanal cumplida: ${v}/${weeks}; no repetir`:yes?'Fija semanal pendiente; prioridad por visitas y carga del auditor':'Ajuste por feriado; prioridad por visitas y carga del auditor'):last?(yes?'Cierre de mes: medición mensual pendiente':'Cuota mensual cumplida'):fortnightReason(yes,v,history.halfCount(OSA,r.folio,half),week));
   }
   const osa=assignments.get(OSA)||new Set();
   if(!last&&!studies.has(OSA)&&[...REPLICAS,...SOVI,FACING].some(s=>studies.has(s)))fail('Falta OSA BEBESTIBLES, necesario para seleccionar Embonor.');
@@ -292,7 +292,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     if(!last&&missing.length)fail(`No se puede replicar OSA en ${s}: hay puntos no habilitados.`,missing.map(f=>`Folio ${f}`));
     for(const r of rows(s)){
       const isFixed=freq(r)==='fixed',v=isFixed?history.weeklyCount(s,r.folio):history.count(s,r.folio);
-      const pending=isFixed?v<WEEKLY_MONTHLY_TARGET:history.fortnightFulfilled(s,r.folio)<2;
+      const pending=isFixed?v<weeks:history.fortnightFulfilled(s,r.folio)<2;
       const yes=pending&&(last||osa.has(r.folio));
       if(!last&&yes&&r.auditor!==byStudy.get(OSA).get(r.folio).auditor)fail(`Auditor inconsistente para el folio ${r.folio} en ${s}.`);
       decide(r,yes,v,last?(yes?'Cierre de mes: estudio pendiente; no requiere OSA':'Cuota mensual cumplida'):!pending?'Cuota mensual cumplida':yes?'Replica la selección OSA':'No seleccionado en OSA');
@@ -336,7 +336,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     if(exception)facingExceptions++;
     decide(r,yes,visits,visits>0?'Visita mensual Facing completada':last?'Cierre de mes: Facing pendiente; no requiere OSA y puede coincidir con SOVI':!osa.has(r.folio)?'No seleccionado en OSA':sovi.has(r.folio)?'Ya seleccionado en SOVI':'Facing pendiente, con OSA y sin SOVI');
   }
-  if(last)warnings.push(`Cierre de mes (semana ${week} de ${weeks}): se cargan todos los estudios pendientes, sin exigir OSA, sin excluir coincidencias con SOVI y sin reducción por feriados. Los semanales con cuatro visitas válidas quedan fuera.`);
+  if(last)warnings.push(`Cierre de mes (semana ${week} de ${weeks}): se cargan todos los estudios pendientes, sin exigir OSA, sin excluir coincidencias con SOVI y sin reducción por feriados. Fijas Embonor: meta de ${weeks} visitas en semanas distintas.`);
   if(facingExceptions)warnings.push(`Cierre de mes: ${facingExceptions} puntos Facing usan la excepción de dependencia con OSA o coincidencia con SOVI.`);
   const soviBaseFolios=new Set(soviBase.map(r=>r.folio));
   const audited=decisions.filter(r=>r.visitsFirstHalf!==null&&(!SOVI.includes(r.study)||r.study===SOVI[0]&&soviBaseFolios.has(r.folio)));

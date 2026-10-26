@@ -1,3 +1,4 @@
+// POY and Ferias Libres keep four visits. Fixed Embonor goals use period.weeks.
 export const WEEKLY_MONTHLY_TARGET=4;
 // Shared by selection, dashboard, graph and Excel. Fortnightly distribution is
 // a planning preference: two valid measurements anywhere in the month meet the
