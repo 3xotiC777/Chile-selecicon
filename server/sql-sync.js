@@ -15,7 +15,9 @@ const safeMessages={
 export function serverClient(env=process.env){
   if(!env.SUPABASE_URL||!env.SUPABASE_SECRET_KEY)throw new SyncError(503,'La sincronización aún no está configurada.','NOT_CONFIGURED');
   return createClient(env.SUPABASE_URL,env.SUPABASE_SECRET_KEY,{auth:{persistSession:false,autoRefreshToken:false},
-    global:{fetch:(url,options)=>fetch(url,{...options,signal:AbortSignal.timeout(20000)})}});
+    // The report save RPC has a 30s database budget. Wait for its confirmation
+    // before reporting failure or attempting to release the sync lease.
+    global:{fetch:(url,options)=>fetch(url,{...options,signal:AbortSignal.timeout(45000)})}});
 }
 export function matchesCron(authorization,secret){
   if(typeof secret!=='string'||secret.length<32||typeof authorization!=='string')return false;
