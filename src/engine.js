@@ -244,11 +244,19 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   // Independent studies establish the route load before the discretionary
   // holiday sample is chosen. Their frequency and closing rules stay intact.
   for(const s of CV){
-    const quincenal=rows(s).filter(r=>freq(r)===2);
-    const selection=chooseFortnight(quincenal,quincenal,f=>last?history.fortnightFulfilled(s,f):history.count(s,f),(f,h)=>last?0:history.halfCount(s,f,h),last?4:week);
     for(const r of rows(s)){
-      const v=history.count(s,r.folio),target=freq(r),yes=target===2?selection.chosen.has(r.folio):v<target;
-      decide(r,yes,v,last?(yes?'Cierre de mes: cuota mensual pendiente':'Cuota mensual cumplida'):target===2?fortnightReason(yes,v,history.halfCount(s,r.folio,half),week):yes?`Frecuencia mensual pendiente: ${v}/${target}`:`Frecuencia mensual cumplida: ${v}/${target}`);
+      const v=history.count(s,r.folio),target=freq(r);
+      // CV loads the full cohort in weeks 1 and 3, without splitting by auditor.
+      // Week 2 recovers visit 1; from week 3 onward recover the monthly goal of 2.
+      const required=target===2?(week<=2?1:2):target,yes=v<required;
+      const reason=v>=target?`Cuota mensual cumplida: ${v}/${target}`
+        :target!==2?`Frecuencia mensual pendiente: ${v}/${target}`
+        :!yes?'Primera visita mensual completada; segunda carga desde semana 3'
+        :week===1?'Primera visita mensual: carga completa de folios pendientes'
+        :week===2?'Pendiente de la primera visita mensual'
+        :week===3?'Segunda visita mensual: carga completa de folios pendientes'
+        :last?`Cierre de mes: cuota mensual pendiente: ${v}/2`:`Pendiente de completar la meta mensual: ${v}/2`;
+      decide(r,yes,v,reason);
     }
   }
   for(const s of FORTNIGHTLY){

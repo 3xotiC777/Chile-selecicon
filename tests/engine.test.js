@@ -166,9 +166,9 @@ test('all SOVI are blocked once their current half is complete, even with fewer 
   const f=fixture();setWeek(f,4);f.report=SOVI.map(s=>visit(s,1,'2026-09-15'));
   const r=select(f);assert(!selected(r,SOVI[0]).has('1'));const d=r.decisions.find(r=>r.study===SOVI[0]&&r.folio==='1');assert.equal(d.visitsFirstHalf,0);assert.equal(d.visitsSecondHalf,1);assert.match(d.reason,/no repetir/);
 });
-test('quincenales and CV frequency 2 do not duplicate a completed current half',()=>{
+test('OSA retains its half preference while CV week 4 recovers the missing monthly visit',()=>{
   const f=fixture();setWeek(f,4);f.universe.find(r=>r.client==='EMBONOR'&&r.folio==='1').frequency='QUINCENALES';f.report=[OSA,...CV].map(s=>visit(s,1,'2026-09-15'));
-  const r=select(f);for(const s of [OSA,...CV])assert(!selected(r,s).has('1'));
+  const r=select(f);assert(!selected(r,OSA).has('1'));for(const s of CV)assert(selected(r,s).has('1'));
 });
 test('two SOVI visits in the first half do not cause a third in the second; anomaly is visible',()=>{
   const f=fixture();setWeek(f,3);f.report=['2026-09-01','2026-09-08'].flatMap(d=>SOVI.map(s=>visit(s,1,d)));
