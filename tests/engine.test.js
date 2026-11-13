@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {select,buildHistory,csvRows,isoDate,DEFAULT_ALIASES,OSA,REPLICAS,SOVI,FACING,CV,FORTNIGHTLY,MONTHLY} from '../src/engine.js';
+import {select,buildHistory,csvRows,isoDate,DEFAULT_ALIASES,OSA,REPLICAS,SOVI,SOVI_ROTATING,SOVI_COMPETITION,FACING,CV,FORTNIGHTLY,MONTHLY} from '../src/engine.js';
 const names=[OSA,...REPLICAS,...SOVI,FACING,...CV,...FORTNIGHTLY,...MONTHLY,'POY','FERIAS LIBRES'];
 function fixture(){
   const studies=names.map((name,i)=>({name,studyId:String(i+100),start:'2026-09-14',end:'2026-09-19'}));
@@ -10,15 +10,15 @@ function fixture(){
 }
 function visit(study,folio,day='2026-09-08',extra={}){return {visit:`${study}-${folio}-${day}`,folio:String(folio),study:DEFAULT_ALIASES[study]||study,day,status:'TERMINADO',...extra};}
 function selected(result,name){return new Set(result.files.flatMap(f=>f.rows).filter(r=>r.study===name).map(r=>r.folio));}
-test('first week works without report and keeps OSA replicas and 8 SOVI identical',()=>{
+test('first week works without report, splits seven SOVI and loads Competition fully',()=>{
   const f=fixture();f.options.week=1;f.hasReport=false;const r=select(f);
   assert.equal(selected(r,OSA).size,10);
   for(const n of REPLICAS)assert.deepEqual(selected(r,n),selected(r,OSA));
-  assert.equal(selected(r,SOVI[0]).size,6);
-  for(const n of SOVI)assert.deepEqual(selected(r,n),selected(r,SOVI[0]));
-  assert.equal(selected(r,FACING).size,4);
+  assert.equal(selected(r,SOVI_COMPETITION).size,10);assert.equal(selected(r,SOVI_ROTATING[0]).size,6);
+  for(const n of SOVI_ROTATING)assert.deepEqual(selected(r,n),selected(r,SOVI_ROTATING[0]));
+  assert.equal(selected(r,FACING).size,0);
   assert.equal(r.files.filter(f=>f.name.startsWith('SOVI')).length,1);
-  assert.equal(r.files.find(f=>f.name==='SOVI EMBONOR.csv').rows.length,48);
+  assert.equal(r.files.find(f=>f.name==='SOVI EMBONOR.csv').rows.length,52);
 });
 test('week 2 requires the report',()=>{const f=fixture();f.options.week=2;f.hasReport=false;assert.throws(()=>select(f),/export/);});
 test('October week 1 accepts September 28 to October 3 and explicitly overrides stale planning dates',()=>{
@@ -130,7 +130,7 @@ test('OSA quincenales split by auditor then select only unfinished points of the
   const second=selected(select(f),OSA);assert.equal(second.size,4);for(const folio of second)assert(!selected(first,OSA).has(folio));
 });
 
-test('full five-week simulation yields exactly one measurement in each half for SOVI and every frequency-2 study',()=>{
+test('full five-week simulation preserves OSA and Cruz Verde frequency-2 rules',()=>{
   for(const mode of ['fixed','fortnightly','mixed']){
     const f=fixture();
     f.universe.filter(r=>r.client==='EMBONOR'&&(mode==='fortnightly'||mode==='mixed'&&Number(r.folio)<=4)).forEach(r=>r.frequency='QUINCENALES');
@@ -138,19 +138,13 @@ test('full five-week simulation yields exactly one measurement in each half for 
     const scheduled=[];
     for(let week=1;week<=5;week++){
       setWeek(f,week);const r=select(f);scheduled.push(r);
-      for(const name of SOVI)assert.deepEqual(selected(r,name),selected(r,SOVI[0]));
       for(const name of REPLICAS)assert.deepEqual(selected(r,name),selected(r,OSA));
-      for(const folio of selected(r,SOVI[0]))assert(selected(r,OSA).has(folio));
+      for(const name of SOVI)for(const folio of selected(r,name))assert(selected(r,OSA).has(folio));
       f.report.push(...r.files.flatMap(file=>file.rows).map(row=>visit(row.study,row.folio,dates[week-1])));
-    }
-    for(const half of [0,2]){
-      const a=selected(scheduled[half],SOVI[0]),b=selected(scheduled[half+1],SOVI[0]);
-      assert.equal(new Set([...a,...b]).size,10);assert([...a].every(folio=>!b.has(folio)));
     }
     assert.equal(selected(scheduled[4],SOVI[0]).size,0);
     const h=buildHistory(f.report,{month:'2026-09',start:'2026-09-30',week:5,aliases:DEFAULT_ALIASES});
     for(const folio of Array.from({length:10},(_,i)=>String(i+1))){
-      assert.equal(h.soviCount(folio),2);assert.equal(h.soviHalfCount(folio,1),1);assert.equal(h.soviHalfCount(folio,2),1);
       if(f.universe.find(r=>r.client==='EMBONOR'&&r.folio===folio).frequency==='QUINCENALES'){
         assert.equal(h.count(OSA,folio),2);assert.equal(h.halfCount(OSA,folio,1),1);assert.equal(h.halfCount(OSA,folio,2),1);
       }
@@ -158,44 +152,52 @@ test('full five-week simulation yields exactly one measurement in each half for 
     }
   }
 });
-test('SOVI closing week selects every unfinished point even if more than half remain',()=>{
+test('SOVI week two takes only group B rather than recovering incomplete group A',()=>{
   const f=fixture();setWeek(f,2);f.report=[...SOVI.map(s=>visit(s,1,'2026-09-01')),...SOVI.slice(0,7).map(s=>visit(s,2,'2026-09-01'))];
-  const chosen=selected(select(f),SOVI[0]);assert.equal(chosen.size,9);assert(!chosen.has('1'));assert(chosen.has('2'));
+  const result=select(f);assert.equal(selected(result,SOVI_COMPETITION).size,0);
+  for(const study of SOVI_ROTATING)assert.deepEqual([...selected(result,study)],['4','5','9','10']);
 });
-test('all SOVI are blocked once their current half is complete, even with fewer than two monthly visits',()=>{
-  const f=fixture();setWeek(f,4);f.report=SOVI.map(s=>visit(s,1,'2026-09-15'));
-  const r=select(f);assert(!selected(r,SOVI[0]).has('1'));const d=r.decisions.find(r=>r.study===SOVI[0]&&r.folio==='1');assert.equal(d.visitsFirstHalf,0);assert.equal(d.visitsSecondHalf,1);assert.match(d.reason,/no repetir/);
+
+test('SOVI week four keeps group B even when its measurement was completed in week three',()=>{
+  const f=fixture();setWeek(f,4);f.report=SOVI.map(s=>visit(s,4,'2026-09-15'));
+  const r=select(f);for(const study of SOVI_ROTATING)assert(selected(r,study).has('4'));
+  const d=r.decisions.find(r=>r.study===SOVI_ROTATING[0]&&r.folio==='4');assert.equal(d.visitsSecondHalf,1);assert.match(d.reason,/Calendario fijo/);
 });
+
 test('OSA retains its half preference while CV week 4 recovers the missing monthly visit',()=>{
   const f=fixture();setWeek(f,4);f.universe.find(r=>r.client==='EMBONOR'&&r.folio==='1').frequency='QUINCENALES';f.report=[OSA,...CV].map(s=>visit(s,1,'2026-09-15'));
   const r=select(f);assert(!selected(r,OSA).has('1'));for(const s of CV)assert(selected(r,s).has('1'));
 });
-test('two SOVI visits in the first half do not cause a third in the second; anomaly is visible',()=>{
+test('observed SOVI overcompletion cannot change the fixed third-week assignments',()=>{
   const f=fixture();setWeek(f,3);f.report=['2026-09-01','2026-09-08'].flatMap(d=>SOVI.map(s=>visit(s,1,d)));
-  const r=select(f);assert(!selected(r,SOVI[0]).has('1'));assert(r.warnings.some(w=>w.includes('más de una medición')));
+  const r=select(f);for(const study of SOVI)assert(selected(r,study).has('1'));
+  assert.match(r.decisions.find(d=>d.study===SOVI_ROTATING[0]&&d.folio==='1').reason,/Calendario fijo/);
 });
+
 test('month boundaries use operational weeks instead of the 15th calendar day',()=>{
   const h=buildHistory([visit(OSA,1,'2026-09-13'),visit(OSA,2,'2026-09-14')],{month:'2026-09',start:'2026-09-21',week:4,aliases:DEFAULT_ALIASES});
   assert.equal(h.secondHalfStart,'2026-09-14');assert.equal(h.halfCount(OSA,'1',1),1);assert.equal(h.halfCount(OSA,'2',2),1);
 });
-test('closing SOVI cannot break OSA dependency when OSA is already completed',()=>{
-  const f=fixture();setWeek(f,2);f.universe.find(r=>r.client==='EMBONOR'&&r.folio==='1').frequency='QUINCENALES';f.report=[visit(OSA,1,'2026-09-01')];
-  const r=select(f);assert(!selected(r,OSA).has('1'));assert(!selected(r,SOVI[0]).has('1'));assert(r.warnings.some(w=>w.includes('SOVI pendientes')));
+test('a scheduled SOVI group stays blocked when OSA has completed its fortnight',()=>{
+  const f=fixture();setWeek(f,2);f.universe.find(r=>r.client==='EMBONOR'&&r.folio==='4').frequency='QUINCENALES';f.report=[visit(OSA,4,'2026-09-01')];
+  const r=select(f);assert(!selected(r,OSA).has('4'));for(const study of SOVI_ROTATING)assert(!selected(r,study).has('4'));
+  assert(r.warnings.some(w=>w.includes('bloqueados')));
 });
-test('uneven CHECKOUT subset must not halve OSA quincenales again and strand them the following week',()=>{
-  const f=fixture();f.universe.filter(r=>r.client==='EMBONOR').forEach(r=>r.frequency='QUINCENALES');
-  f.planning.rows=f.planning.rows.filter(r=>!(r.study===SOVI[7]&&['4','5'].includes(r.folio)));
-  setWeek(f,1);const first=select(f);
-  for(const folio of ['1','2','3'])assert(selected(first,SOVI[0]).has(folio));
+
+test('an uneven CHECKOUT subset still forms complementary fixed SOVI groups',()=>{
+  const f=fixture();f.planning.rows=f.planning.rows.filter(r=>!(r.study===SOVI[7]&&['4','5'].includes(r.folio)));
+  setWeek(f,1);const first=select(f);f.options.soviSchedule=first.soviSchedule;
   f.report=first.files.flatMap(file=>file.rows).map(row=>visit(row.study,row.folio,'2026-09-01'));
-  setWeek(f,2);const second=select(f);
-  assert.equal(new Set([...selected(first,SOVI[0]),...selected(second,SOVI[0])]).size,8);
+  setWeek(f,2);const second=select(f),a=selected(first,SOVI_ROTATING[0]),b=selected(second,SOVI_ROTATING[0]);
+  assert.equal(new Set([...a,...b]).size,8);assert([...a].every(f=>!b.has(f)));
 });
-test('SOVI quincenal needs a full eight-study visit to meet quota',()=>{
-  const f=fixture();f.options.week=2;f.universe.filter(r=>r.client==='EMBONOR').forEach(r=>r.frequency='QUINCENALES');
-  f.report=[...SOVI.map(s=>visit(s,1)),...SOVI.slice(0,7).map(s=>visit(s,2))];
-  const r=select(f);assert(!selected(r,SOVI[0]).has('1'));assert(selected(r,SOVI[0]).has('2'));
+
+test('SOVI calendar ignores complete or partial histories on quincenal points with OSA available',()=>{
+  const f=fixture();setWeek(f,2);f.universe.filter(r=>r.client==='EMBONOR').forEach(r=>r.frequency='QUINCENALES');
+  f.report=[...SOVI.map(s=>visit(s,4)),...SOVI.slice(0,7).map(s=>visit(s,1))];
+  const r=select(f);for(const study of SOVI_ROTATING){assert(selected(r,study).has('4'));assert(!selected(r,study).has('1'));}
 });
+
 test('one and two holidays reduce only fixed OSA using 17%, with fewer visits first',()=>{
   for(const [holidays,target] of [[0,10],[1,8],[2,7]]){
     const f=fixture();f.options.holidays=holidays;f.report=[visit(OSA,1),visit(OSA,2)];const r=select(f);
@@ -222,23 +224,24 @@ test('holiday ties use all committed study loads, preserve auditors and propagat
   assert.equal(r.workload.reduce((sum,a)=>sum+a.assignments,0),r.metrics.rows);
   for(const a of r.workload)assert.equal(a.points,new Set(r.files.flatMap(file=>file.rows).filter(row=>row.auditor===a.auditor).map(row=>row.folio)).size);
 });
-test('SOVI fixed quota rounds up independently for each auditor and prioritizes zero visits',()=>{
+test('SOVI fixed groups round up per auditor and do not reprioritize from the export',()=>{
   const f=fixture();f.report=SOVI.map(s=>visit(s,1));const r=select(f);
-  assert(!selected(r,SOVI[0]).has('1'));assert.deepEqual(r.soviAuditors.map(a=>a.selected),[3,3]);
+  for(const study of SOVI)assert(selected(r,study).has('1'));assert.deepEqual(r.soviAuditors.map(a=>a.selected),[3,3]);
 });
+
 test('points missing CHECKOUT stay in OSA and are excluded from all SOVI',()=>{
   const f=fixture();f.planning.rows=f.planning.rows.filter(r=>!(r.study===SOVI[7]&&r.folio==='1'));
   const r=select(f);assert(selected(r,OSA).has('1'));for(const s of SOVI)assert(!selected(r,s).has('1'));assert(selected(r,FACING).has('1'));
 });
 test('Facing avoids SOVI normally and overlaps only during the declared last week',()=>{
   const f=fixture();f.report=[visit(FACING,10)];let r=select(f);for(const folio of selected(r,FACING))assert(!selected(r,SOVI[0]).has(folio));
-  f.options.week=5;r=select(f);assert.equal(selected(r,FACING).size,9);assert(r.metrics.facingExceptions>0);assert(!selected(r,FACING).has('10'));
+  f.options.week=5;r=select(f);assert.equal(selected(r,FACING).size,9);assert.equal(r.metrics.facingExceptions,0);assert(!selected(r,FACING).has('10'));
   f.options.week=4;f.options.weeks=4;r=select(f);assert.equal(selected(r,FACING).size,9);
 });
 test('Facing closing week includes every pending point, overriding normal crosses and holidays',()=>{
   const f=fixture();f.options.week=5;f.options.holidays=2;const r=select(f);
   assert.equal(selected(r,FACING).size,10);assert.equal(selected(r,OSA).size,10);
-  assert(r.warnings.some(w=>w.includes('sin exigir OSA')));
+  assert(r.warnings.some(w=>w.includes('Facing pueden cargarse sin OSA')));
 });
 test('Cruz Verde counts each study separately and observes frequencies 2,3,4',()=>{
   const f=fixture();for(let folio=1;folio<=3;folio++)for(let d=1;d<=folio+1;d++)f.report.push(visit(CV[0],folio,`2026-09-0${d}`));

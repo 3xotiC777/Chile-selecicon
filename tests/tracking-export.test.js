@@ -55,13 +55,13 @@ test('two completed weeks in the same half fulfill the monthly quota in the Exce
   assert.equal(model.rows[0][column(model,'monthlyStatus')],'CUMPLIDO');
 });
 
-test('SOVI reports partial components per week and requires eight distinct studies to finish',()=>{
+test('SOVI export reports six of seven as partial and keeps Competition independent',()=>{
   const reports=SOVI.slice(0,7).map(study=>visit('1',study,'2026-09-29'));
   reports.push(visit('1',SOVI[0],'2026-09-30'),visit('1',SOVI[7],'2026-10-01','RECHAZO'));
   reports.push(...SOVI.map(study=>visit('1',study,'2026-10-06')));
   const data=track(SOVI.map(study=>({folio:'1',study})),reports);
-  assert.equal(data.points.length,1);
-  assert.deepEqual(data.points[0].weekStates.map(weeklyStateLabel),['PARCIAL SOVI (7/8) / RECHAZO','TERMINADO']);
+  assert.equal(data.points.length,2);
+  assert.deepEqual(data.points[0].weekStates.map(weeklyStateLabel),['PARCIAL SOVI (6/7) / RECHAZO','TERMINADO']);
   assert.equal(data.points[0].fulfilledVisits,1);
 });
 

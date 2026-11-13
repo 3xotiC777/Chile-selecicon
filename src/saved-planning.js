@@ -1,9 +1,9 @@
-import {id,normalize,SOVI} from './engine.js';
+import {id,normalize,SOVI,SOVI_COMPETITION} from './engine.js';
 
 const key=(folio,study)=>JSON.stringify([id(folio),normalize(study)]);
 const studiesFor=study=>{
   const name=normalize(study);
-  return name==='CENCOSUD'?['PRECIOS CENCOSUD','FOTOGRAFIAS CENCOSUD']:SOVI.includes(name)?['SOVI EMBONOR']:[name];
+  return name==='CENCOSUD'?['PRECIOS CENCOSUD','FOTOGRAFIAS CENCOSUD']:name===SOVI_COMPETITION?[name]:SOVI.includes(name)?['SOVI EMBONOR']:[name];
 };
 
 /** Most recently saved, including a corrected earlier week. Never mutates the list. */
@@ -18,6 +18,7 @@ export function compactSelection(result){
   const columns=['folio','auditor','study','studyId','start','end'];
   const files=result.files.map(file=>({...file,rows:file.rows.map(row=>Object.fromEntries(columns.filter(key=>Object.hasOwn(row,key)).map(key=>[key,row[key]])))}));
   const selection={files,period:result.period,metrics:result.metrics,warnings:result.warnings,workload:result.workload,soviAuditors:result.soviAuditors};
+  if(result.soviSchedule)selection.soviSchedule=result.soviSchedule;
   if(Array.isArray(result.decisions))selection.decisions=result.decisions.map(({folio,study,selected,reason})=>({folio,study,selected,reason}));
   return selection;
 }

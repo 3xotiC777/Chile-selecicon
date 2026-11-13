@@ -60,7 +60,7 @@ test('POY and Ferias count their own completed weeks independently',()=>{
   assert.deepEqual(folios(result,'POY'),['002','003']);assert.deepEqual(folios(result,'FERIAS LIBRES'),['001','003']);
 });
 
-test('the final week loads pending replicas, Facing and all eight SOVI even when OSA is already complete',()=>{
+test('the final week recovers replicas and Facing while SOVI keeps its calendar and OSA dependency',()=>{
   const input=fixture();
   input.universe.filter(row=>row.client==='EMBONOR'&&row.folio==='001').forEach(row=>row.frequency='QUINCENALES');
   for(const study of weekly)addWeeks(input,study,'001',starts.slice(0,study===REPLICAS[0]?1:[OSA,...REPLICAS].includes(study)?2:4));
@@ -69,9 +69,9 @@ test('the final week loads pending replicas, Facing and all eight SOVI even when
   assert(!folios(result,OSA).includes('001'));
   assert(folios(result,REPLICAS[0]).includes('001'));
   for(const study of REPLICAS.slice(1))assert(!folios(result,study).includes('001'));
-  for(const study of SOVI)assert(folios(result,study).includes('001'));
+  for(const study of SOVI)assert(!folios(result,study).includes('001'));
   assert(folios(result,FACING).includes('001'));
-  const sovi=result.files.find(file=>file.name==='SOVI EMBONOR.csv');assert.equal(sovi.rows.filter(row=>row.folio==='001').length,8);
+  const sovi=result.files.find(file=>file.name==='SOVI EMBONOR.csv');assert.equal(sovi.rows.filter(row=>row.folio==='001').length,0);
   assert.equal(folios(result,'POY').includes('001'),false);
 });
 
@@ -82,7 +82,7 @@ test('closing overrides apply in week four of a four-week month, but not in week
     input.report.push(visit(OSA,'001',starts[0]),visit(OSA,'001',starts[2]));
     const result=select(input),closing=weeks===4;
     assert.equal(folios(result,FACING).includes('001'),closing);
-    for(const study of [...SOVI,...REPLICAS])assert.equal(folios(result,study).includes('001'),closing,study);
+    for(const study of REPLICAS)assert.equal(folios(result,study).includes('001'),closing,study);for(const study of SOVI)assert(!folios(result,study).includes('001'));
     assert.equal(result.metrics.fixedTarget,closing?2:1);
   }
 });
@@ -111,24 +111,24 @@ test('the fifth Embonor week includes four-visit fixed points despite holidays, 
   }
 });
 
-test('a second monthly measurement in the closing week agrees across dashboard, graph and Excel',()=>{
+test('non-SOVI second monthly measurements in closing agree across dashboard, graph and Excel',()=>{
   for(const weeks of [4,5]){
     const input=fixture(weeks,weeks),closing=starts[weeks-1];
     input.universe.filter(row=>row.client==='EMBONOR').forEach(row=>row.frequency='QUINCENALES');
     const studies=[OSA,...REPLICAS,...FORTNIGHTLY,...CV];
-    for(const study of [...studies,...SOVI])input.report.push(visit(study,'001',starts[2]));
-    const before=buildTracking(input);assert(before.points.filter(p=>p.folio==='001'&&p.rule==='fortnightly').every(p=>p.fulfilledVisits===1));
+    for(const study of studies)input.report.push(visit(study,'001',starts[2]));
+    const before=buildTracking(input);assert(before.points.filter(p=>p.folio==='001'&&studies.includes(p.study)&&p.rule==='fortnightly').every(p=>p.fulfilledVisits===1));
     const result=select(input);
-    for(const study of [...studies,...SOVI])assert(folios(result,study).includes('001'),study);
+    for(const study of studies)assert(folios(result,study).includes('001'),study);
     input.report.push(...result.files.flatMap(file=>file.rows).filter(row=>row.folio==='001').map(row=>visit(row.study,row.folio,closing)));
-    const after=buildTracking(input),points=after.points.filter(p=>p.folio==='001'&&p.rule==='fortnightly');
+    const after=buildTracking(input),points=after.points.filter(p=>p.folio==='001'&&studies.includes(p.study)&&p.rule==='fortnightly');
     assert(points.every(p=>p.complete&&p.fulfilledVisits===2&&p.visitsFirstHalf===0&&p.visitsSecondHalf===2));
     const timeline=summarizeWeeklyProgress(points,after.period);assert.equal(timeline.weeks.at(-1).fulfilledVisits,points.length);assert.equal(timeline.weeks.at(-1).cumulativeProgress,100);
     for(const model of progressSheets(points,after.period)){
       const done=model.columns.findIndex(([key])=>key==='fulfilledVisits');assert(model.rows.every(row=>row[done]===2));
     }
     input.options.dateOverride={start:closing.slice(0,8)+String(Number(closing.slice(8))+1).padStart(2,'0'),end:ends[weeks-1]};
-    const again=select(input);for(const study of [...studies,...SOVI])assert(!folios(again,study).includes('001'));
+    const again=select(input);for(const study of studies)assert(!folios(again,study).includes('001'));
   }
 });
 
@@ -145,7 +145,7 @@ test('closing cannot invent a missing SOVI component, count failed surveys or re
 
 test('a closing month can export enabled pending dependents even when OSA has no column in that planning',()=>{
   const input=fixture(5,5,[...REPLICAS,...SOVI,FACING]);
-  const result=select(input);for(const study of [...REPLICAS,...SOVI,FACING])assert.equal(folios(result,study).length,3);
+  const result=select(input);for(const study of [...REPLICAS,FACING])assert.equal(folios(result,study).length,3);for(const study of SOVI)assert.equal(folios(result,study).length,0);
   input.options.week=4;assert.throws(()=>select(input),/Falta OSA BEBESTIBLES/);
 });
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {buildTracking,durationMinutes,summarizeTracking,trackingCsv,productivityCsv,reportForPeriod} from '../src/tracking.js';
-import {OSA,REPLICAS,SOVI,FACING} from '../src/engine.js';
+import {OSA,REPLICAS,SOVI,SOVI_COMPETITION,FACING} from '../src/engine.js';
 
 const options={month:'2026-10',week:2,weeks:5,start:'2026-10-05',end:'2026-10-10'};
 const planning=rows=>({studies:[...new Set(rows.map(r=>r.study))].map(name=>({name,start:options.start,end:options.end})),rows:rows.map(r=>({auditor:'100',auditorName:'Ana',start:options.start,end:options.end,studyId:'1',...r}))});
@@ -75,13 +75,13 @@ test('OSA replicas use their own completed studies and report aliases',()=>{
   const r=buildTracking({planning:planning(rows),universe:[u('1')],report:[visit('1','OSA VINOS 2'),visit('1','ESTUDIO DE EXHIBICIONES COCA COLA')],options});
   assert.equal(point(r,OSA).validVisits,0);assert.equal(point(r,'OSA VINOS EMBONOR').validVisits,1);assert.equal(point(r,'EXHIBICIONES ADICIONALES EMBONOR').validVisits,1);assert.equal(point(r,'OSA ABI EMBONOR').validVisits,0);
 });
-test('SOVI consolidates eight TERMINADO on different days in same week',()=>{
+test('SOVI consolidates seven TERMINADO across a week and tracks Competition separately',()=>{
   const rows=SOVI.map(study=>({folio:'1',study})),report=SOVI.map((study,i)=>visit('1',study,i<4?'2026-09-28':'2026-10-03'));
-  const r=buildTracking({planning:planning(rows),universe:[u('1')],report,options});assert.equal(r.points.length,1);const p=point(r,'SOVI EMBONOR');assert.equal(p.validVisits,1);assert.equal(p.fulfilledVisits,1);assert.equal(p.attempts,8);assert.equal(r.summary.completedSurveys,8);
+  const r=buildTracking({planning:planning(rows),universe:[u('1')],report,options});assert.equal(r.points.length,2);const p=point(r,'SOVI EMBONOR');assert.equal(p.validVisits,1);assert.equal(p.fulfilledVisits,1);assert.equal(p.attempts,7);assert.equal(point(r,SOVI_COMPETITION).fulfilledVisits,1);assert.equal(r.summary.completedSurveys,8);
 });
 test('SOVI never combines components across weeks and flags partial measurements',()=>{
   const report=SOVI.map((study,i)=>visit('1',study,i<4?'2026-09-28':'2026-10-05'));
-  const r=buildTracking({planning:planning(SOVI.map(study=>({folio:'1',study}))),universe:[u('1')],report,options});const p=point(r,'SOVI EMBONOR');assert.equal(p.validVisits,0);assert.equal(p.incompleteWeeks,2);assert.equal(p.partialSovi[0].completedStudies,4);assert.equal(r.quality.incompleteSovi,1);
+  const r=buildTracking({planning:planning(SOVI.map(study=>({folio:'1',study}))),universe:[u('1')],report,options});const p=point(r,'SOVI EMBONOR');assert.equal(p.validVisits,0);assert.equal(p.incompleteWeeks,2);assert.equal(p.partialSovi[0].completedStudies,3);assert.equal(r.quality.incompleteSovi,1);
 });
 test('seven SOVI studies plus a repeated study does not complete eight',()=>{
   const report=SOVI.slice(0,7).map(s=>visit('1',s));report.push(visit('1',SOVI[0]));
