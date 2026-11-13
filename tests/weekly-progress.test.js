@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {buildTracking} from '../src/tracking.js';
 import {summarizeWeeklyProgress} from '../src/weekly-progress.js';
-import {OSA,REPLICAS,FACING,SOVI} from '../src/engine.js';
+import {OSA,REPLICAS,FACING,SOVI,SOVI_COMPETITION} from '../src/engine.js';
 import {progressSheets} from '../src/tracking-export.js';
 
 const options={month:'2026-10',week:2,weeks:5,start:'2026-10-05',end:'2026-10-10',monthRange:{start:'2026-09-28',end:'2026-10-31'}};
@@ -79,17 +79,18 @@ test('SOVI counts two complete weekly measurements toward the monthly goal even 
   const result=tracking(SOVI.map(study=>({folio:'1',study})),report),point=result.points[0];
   assert.equal(point.validVisits,3);assert.equal(point.fulfilledVisits,2);assert.equal(point.incompleteWeeks,1);
   assert.deepEqual(point.fulfilledByWeek,[{weekStart:'2026-09-28',fulfilledVisits:1},{weekStart:'2026-10-05',fulfilledVisits:1}]);
-  const weekly=summarizeWeeklyProgress(result.points,result.period);
+  const weekly=summarizeWeeklyProgress([point],result.period);
   assert.deepEqual(weekly.weeks.map(week=>week.fulfilledVisits),[1,1,0,0,0]);assert.equal(weekly.fulfilledVisits,2);
+  const competition=result.points.find(p=>p.study===SOVI_COMPETITION);assert.equal(competition.fulfilledVisits,2);
 });
-test('rejected, empty and incomplete SOVI records indicate report coverage without creating progress',()=>{
+test('an incomplete seven-study group gives no progress while its independent Competition can count',()=>{
   const rows=[{folio:'1',study:FACING},...SOVI.map(study=>({folio:'2',study}))];
   const report=[visit('1',FACING,'2026-10-06','RECHAZO'),visit('1',FACING,'2026-10-07','VACIO'),...SOVI.slice(0,7).map(study=>visit('2',study,'2026-10-08'))];
   const result=tracking(rows,report),weekly=summarizeWeeklyProgress(result.points,result.period);
-  assert.equal(weekly.hasWeeklyData,true);assert.equal(weekly.fulfilledVisits,0);
-  assert.deepEqual(weekly.weeks.map(week=>week.fulfilledVisits),[0,0,0,0,0]);
+  assert.equal(weekly.hasWeeklyData,true);assert.equal(weekly.fulfilledVisits,1);
+  assert.deepEqual(weekly.weeks.map(week=>week.fulfilledVisits),[0,1,0,0,0]);
   assert.deepEqual(weekly.weeks.map(week=>week.hasRecords),[true,true,false,false,false]);
-  assert(result.points.every(point=>point.fulfilledByWeek.length===0));
+  assert(result.points.filter(point=>point.study!==SOVI_COMPETITION).every(point=>point.fulfilledByWeek.length===0));
 });
 test('weekly totals and cumulative percentages match the filtered monthly target',()=>{
   const result=tracking([{folio:'1',study:FACING},{folio:'2',study:OSA}],[visit('1',FACING,'2026-09-28'),visit('2',OSA,'2026-09-28'),visit('2',OSA,'2026-10-12')],[{client:'EMBONOR',folio:'2',frequency:'QUINCENALES'}]);

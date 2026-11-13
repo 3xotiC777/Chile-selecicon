@@ -23,12 +23,12 @@ export function weeklyOutcomeFlag(entry){
 }
 
 // Completed work wins over failed attempts in the same week. SOVI only
-// completes with all eight distinct components, as counted by buildTracking.
+// completes with all seven rotating components; Competition is independent.
 export function weeklyStateLabel(entry){
   if(!entry)return 'SIN REGISTROS';
   if(entry.completedVisits>0)return 'TERMINADO';
   const states=[];
-  if(entry.completedStudies>0)states.push(`PARCIAL SOVI (${entry.completedStudies}/8)`);
+  if(entry.completedStudies>0)states.push(`PARCIAL SOVI (${entry.completedStudies}/${entry.requiredStudies??8})`);
   if(entry.rejected>0)states.push('RECHAZO');
   if(entry.empty>0)states.push('VACIO');
   if(entry.other>0)states.push(...(entry.otherStatuses?.length?entry.otherStatuses:['OTRO ESTADO']));
@@ -85,7 +85,7 @@ export function progressSheets(points,period,{filters={}}={}){
       [`AVANCE ${period.month} · ${client}`],
       [`Mes operativo: ${shortDate(period.operationalStart)} al ${shortDate(period.operationalEnd)}. Corte: ${shortDate(period.asOf)}. Última actividad con fecha: ${shortDate(period.lastReportDay)||'Sin registros'}.`],
       [`Filtros: ${scope}. Una fila por folio y estudio. Auditor y datos del punto: base de planeación.`],
-      ['TERMINADO: visita válida en la semana. SOVI: exige 8 estudios. SIN REGISTROS: sin estado fechado; no implica que el punto no se haya cargado.'],
+      ['TERMINADO: visita válida en la semana. SOVI: exige los siete estudios del grupo en la misma semana. Competencia se mide por separado. SIN REGISTROS: sin estado fechado; no implica que el punto no se haya cargado.'],
       [`${prefix}_n: semana calendario; 1 = TERMINADO o RECHAZO, 0 = VACIO, sin registro u otro estado. Sin fecha se muestra aparte. CUMPLIDAS cuenta visitas válidas; meta semanal: 4 al mes. Meta quincenal: dos mediciones al mes, aunque sean en la misma quincena.`],
       columns.map(([,label])=>label),...rows
     ]};
