@@ -19,13 +19,13 @@ export function selectionSaveInput(draft,workspace){
   const sameMonth=workspace?.month===month;
   const unchangedPlanning=sameMonth&&workspace.planning&&sameData(planning.rows,workspace.planning.rows)&&sameData(planning.studies,workspace.planning.studies);
   const optionMetadata={...draft.options,...selection.period,aliases:{...TRACKING_ALIASES,...draft.options.aliases}};
-  delete optionMetadata.soviSchedule;
+  delete optionMetadata.soviPlans;
   return {
     month,selection,revision:draft.workspaceRevision??workspace?.revision??0,
     // null means retain the existing column inside the same atomic RPC.
     planning:unchangedPlanning?null:planning,
     universe:sameMonth&&sameData(draft.universe,workspace.universe)?null:draft.universe,
     report:sameMonth&&sameData(report,workspace.report)?null:report,
-    metadata:{...draft.metadata,...(draft.saveRequestId?{saveRequestId:draft.saveRequestId}:{}),...(selection.soviSchedule?{soviSchedule:selection.soviSchedule}:{}),options:optionMetadata,selectionOrigin:'Guardada por el administrador'},
+    metadata:{...draft.metadata,...(draft.saveRequestId?{saveRequestId:draft.saveRequestId}:{}),options:optionMetadata,selectionOrigin:'Guardada por el administrador'},
   };
 }

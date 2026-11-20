@@ -6,7 +6,7 @@ import {summarizeWeeklyProgress} from '../src/weekly-progress.js';
 import {progressSheets,weeklyStateLabel} from '../src/tracking-export.js';
 import {compactSelection,savedPlanningIndex} from '../src/saved-planning.js';
 import {selectionSaveInput} from '../src/selection-save-input.js';
-import {sharedSoviSchedule} from '../src/sovi-schedule.js';
+import {sharedSoviPlans} from '../src/sovi-schedule.js';
 
 const starts=['2026-09-28','2026-10-05','2026-10-12','2026-10-19','2026-10-26'];
 const ends=['2026-10-03','2026-10-10','2026-10-17','2026-10-24','2026-10-31'];
@@ -20,11 +20,12 @@ function fixture(count=100){
 function week(input,number){input.options.week=number;input.hasReport=number>1;for(const row of [...input.planning.rows,...input.planning.studies])Object.assign(row,{start:starts[number-1],end:ends[number-1]});}
 const folios=(result,study)=>new Set(result.files.flatMap(f=>f.rows).filter(r=>r.study===study).map(r=>r.folio));
 
-test('100 SOVI folios follow 50/50/50/50 and Competition 100/0/100/0 regardless of completed, missing or partial visits',()=>{
+test('saved SOVI plans distribute 100 folios over both weeks of each fortnight with no duplicates',()=>{
  for(const mode of ['completed','none','partial','rejected']){
-  const input=fixture(),results=[],counts=new Map();
+  const input=fixture(),results=[],counts=new Map(),workspace={month:'2026-10',weeklyPlans:[]};
   for(let number=1;number<=5;number++){
-   week(input,number);const result=select(input);results.push(result);input.options.soviSchedule=result.soviSchedule;
+   week(input,number);input.options.soviPlans=sharedSoviPlans(workspace,'2026-10');
+   const result=select(input);results.push(result);workspace.weeklyPlans.push({month:'2026-10',week:number,result:compactSelection(result)});
    assert.equal(folios(result,SOVI_COMPETITION).size,number===1||number===3?100:0);
    for(const study of SOVI_ROTATING)assert.equal(folios(result,study).size,number===5?0:50);
    for(const study of SOVI)for(const folio of folios(result,study)){assert(folios(result,OSA).has(folio));const key=study+'|'+folio;counts.set(key,(counts.get(key)||0)+1);}
@@ -48,32 +49,17 @@ test('100 SOVI folios follow 50/50/50/50 and Competition 100/0/100/0 regardless 
  }
 });
 
-test('SOVI does not move blocked folios or bypass OSA even in the declared final week',()=>{
+test('week 4 schedules a still-pending SOVI folio even when OSA is absent',()=>{
  const input=fixture(4);week(input,4);input.options.weeks=4;
- input.universe.forEach(row=>row.frequency='QUINCENALES');
- input.report=input.planning.rows.filter(r=>r.study===OSA).flatMap(row=>[visit(row,starts[0]),visit(row,starts[2])]);
- const result=select(input);for(const study of SOVI)assert.equal(folios(result,study).size,0);
- assert(result.warnings.some(w=>w.includes('bloqueados')));
- assert.equal(Object.keys(result.soviSchedule.groups).length,4);
- assert(result.decisions.filter(d=>SOVI_ROTATING.includes(d.study)&&result.soviSchedule.groups[d.folio]===2).every(d=>d.reason.includes('no seleccionado en OSA')));
-});
-
-test('a four-week closing loads only group B even when group A has no completed visits',()=>{
- const input=fixture(10);week(input,4);input.options.weeks=4;
- const result=select(input);assert.equal(folios(result,SOVI_COMPETITION).size,0);
- for(const study of SOVI_ROTATING)assert.deepEqual([...folios(result,study)],['6','7','8','9','10']);
- assert.equal(result.metrics.soviRows,35);
-});
-
-test('saved groups survive a new report and changed RETAIL order across administrators',()=>{
- const input=fixture(9),first=select(input),draft={...input,result:first,workspaceRevision:3,metadata:{}};
- const payload=selectionSaveInput(draft,{month:'2026-10',planning:input.planning,universe:input.universe,report:[],revision:3});
- assert.deepEqual(payload.metadata.soviSchedule,first.soviSchedule);assert.equal(payload.metadata.options.soviSchedule,undefined);
- const workspace={month:'2026-10',metadata:{...payload.metadata},weeklyPlans:[{result:compactSelection(first)}]};
- input.options.soviSchedule=sharedSoviSchedule(workspace,'2026-10');input.planning.rows.reverse();week(input,3);
- input.report=input.planning.rows.filter(r=>SOVI.includes(r.study)).flatMap(row=>[visit(row,starts[0]),visit(row,starts[1])]);
- const third=select(input);assert.deepEqual(third.soviSchedule,first.soviSchedule);
- for(const study of SOVI)assert.deepEqual(folios(third,study),folios(first,study));
+ const plan={period:{month:'2026-10',week:3},files:[{rows:input.planning.rows.filter(row=>row.folio!=='4'&&SOVI_ROTATING.includes(row.study))}]};
+ input.options.soviPlans=sharedSoviPlans({month:'2026-10',weeklyPlans:[{month:'2026-10',week:3,result:plan}]},'2026-10');
+ input.planning.rows=input.planning.rows.filter(row=>row.folio!=='4'||row.study!==OSA);
+ const result=select(input);
+ for(const study of SOVI_ROTATING)assert.deepEqual([...folios(result,study)],['4']);
+ assert.equal(folios(result,OSA).has('4'),false);
+ assert.equal(result.metrics.soviRows,7);
+ const payload=selectionSaveInput({...input,result,metadata:{}});
+ assert.equal(payload.metadata.options.soviPlans,undefined);
 });
 
 test('Competition and seven-study measurements have separate progress, weekly graphs and saved planning membership',()=>{

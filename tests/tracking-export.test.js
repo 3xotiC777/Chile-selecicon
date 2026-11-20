@@ -5,7 +5,7 @@ import JSZip from 'jszip';
 import {DOMParser} from '@xmldom/xmldom';
 import {buildTracking} from '../src/tracking.js';
 import {progressSheets,progressWorkbook,detailWorkbook,detailSheet,weeklyStateLabel,weeklyOutcomeFlag,calendarWeek} from '../src/tracking-export.js';
-import {OSA,SOVI,FACING} from '../src/engine.js';
+import {OSA,REPLICAS,SOVI,FACING} from '../src/engine.js';
 
 const options={month:'2026-10',week:2,weeks:5,start:'2026-10-05',end:'2026-10-10',monthRange:{start:'2026-09-28',end:'2026-10-31'}};
 const planning=rows=>({studies:[],rows:rows.map(row=>({auditor:'001',auditorName:'Ana',...row}))});
@@ -46,7 +46,7 @@ test('weekly states include September in October, preserve failures, and dedupli
 });
 
 test('two completed weeks in the same half fulfill the monthly quota in the Excel',()=>{
-  const data=track([{folio:'1',study:OSA}],['2026-09-28','2026-10-05'].map(day=>visit('1',OSA,day)),{universe:[{client:'EMBONOR',folio:'1',frequency:'QUINCENALES'}]});
+  const data=track([{folio:'1',study:REPLICAS[1]}],['2026-09-28','2026-10-05'].map(day=>visit('1',REPLICAS[1],day)),{universe:[{client:'EMBONOR',folio:'1',frequency:'QUINCENALES'}]});
   assert.deepEqual(data.points[0].weekStates.map(weeklyStateLabel),['TERMINADO','TERMINADO']);
   assert.equal(data.points[0].fulfilledVisits,2);assert.equal(data.points[0].remaining,0);
   const model=progressSheets(data.points,data.period)[0];

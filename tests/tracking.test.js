@@ -40,8 +40,8 @@ test('confirmed monthly tracking uses inclusive range extremes and caps as-of at
 });
 test('an edited monthly range changes tracking counts and preserves Monday-based halves',()=>{
   const monthRange={start:'2026-10-01',end:'2026-10-31'};
-  const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1','QUINCENALES')],report:['2026-09-28','2026-10-01','2026-10-11','2026-10-12'].map(day=>visit('1',OSA,day)),options:{...options,monthRange}});
-  const p=point(r,OSA);assert.equal(p.validVisits,3);assert.equal(p.visitsFirstHalf,2);assert.equal(p.visitsSecondHalf,1);assert.equal(p.fulfilledVisits,2);
+  const r=buildTracking({planning:planning([{folio:'1',study:REPLICAS[1]}]),universe:[u('1','QUINCENALES')],report:['2026-09-28','2026-10-01','2026-10-11','2026-10-12'].map(day=>visit('1',REPLICAS[1],day)),options:{...options,monthRange}});
+  const p=point(r,REPLICAS[1]);assert.equal(p.validVisits,3);assert.equal(p.visitsFirstHalf,2);assert.equal(p.visitsSecondHalf,1);assert.equal(p.fulfilledVisits,2);
   assert.equal(r.period.secondHalfStart,'2026-10-12');assert.equal(r.quality.outsidePeriod,1);
 });
 test('tracking blocks a weekly load outside its confirmed month range',()=>{
@@ -63,12 +63,12 @@ test('fixed OSA needs separate completed weeks, not repeated surveys in one week
   const p=point(r,OSA);assert.equal(p.target,5);assert.equal(p.validVisits,3);assert.equal(p.fulfilledVisits,2);assert.equal(p.remaining,3);assert.equal(p.progress,40);assert.equal(p.excessVisits,1);
 });
 test('two first-half visits fulfill the monthly quincenal target',()=>{
-  const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1','QUINCENALES')],report:[visit('1',OSA,'2026-09-28'),visit('1',OSA,'2026-10-05')],options});
-  const p=point(r,OSA);assert.equal(p.validVisits,2);assert.equal(p.fulfilledVisits,2);assert.equal(p.visitsFirstHalf,2);assert.equal(p.visitsSecondHalf,0);assert.equal(p.remaining,0);assert.equal(p.complete,true);assert.equal(p.progress,100);
+  const r=buildTracking({planning:planning([{folio:'1',study:REPLICAS[1]}]),universe:[u('1','QUINCENALES')],report:[visit('1',REPLICAS[1],'2026-09-28'),visit('1',REPLICAS[1],'2026-10-05')],options});
+  const p=point(r,REPLICAS[1]);assert.equal(p.validVisits,2);assert.equal(p.fulfilledVisits,2);assert.equal(p.visitsFirstHalf,2);assert.equal(p.visitsSecondHalf,0);assert.equal(p.remaining,0);assert.equal(p.complete,true);assert.equal(p.progress,100);
 });
 test('quincenal completes one in each operational half and caps overcompletion',()=>{
-  const r=buildTracking({planning:planning([{folio:'1',study:OSA}]),universe:[u('1','QUINCENALES')],report:[visit('1',OSA,'2026-10-05'),visit('1',OSA,'2026-10-12'),visit('1',OSA,'2026-10-19')],options});
-  const p=point(r,OSA);assert.equal(p.fulfilledVisits,2);assert.equal(p.progress,100);assert.equal(p.complete,true);assert.equal(p.excessVisits,1);
+  const r=buildTracking({planning:planning([{folio:'1',study:REPLICAS[1]}]),universe:[u('1','QUINCENALES')],report:[visit('1',REPLICAS[1],'2026-10-05'),visit('1',REPLICAS[1],'2026-10-12'),visit('1',REPLICAS[1],'2026-10-19')],options});
+  const p=point(r,REPLICAS[1]);assert.equal(p.fulfilledVisits,2);assert.equal(p.progress,100);assert.equal(p.complete,true);assert.equal(p.excessVisits,1);
 });
 test('OSA replicas use their own completed studies and report aliases',()=>{
   const rows=[{folio:'1',study:OSA},...REPLICAS.map(study=>({folio:'1',study}))];
@@ -126,7 +126,7 @@ test('unknown studies contribute productivity but do not invent targets or match
   const r=buildTracking({planning:planning([{folio:'1',study:FACING}]),report:[visit('1','UNCONFIGURED STUDY',undefined,'TERMINADO',{client:'COLGATE'})],options});assert.equal(r.summary.target,1);assert.equal(r.summary.progress,0);assert.equal(r.summary.surveys,1);assert.equal(r.quality.unknownStudies,1);assert.equal(r.studies.find(s=>s.study==='UNCONFIGURED STUDY').hasTarget,false);
 });
 test('missing required frequencies are visible and excluded from percentage denominator',()=>{
-  const r=buildTracking({planning:planning([{folio:'1',study:OSA},{folio:'2',study:FACING}]),report:[visit('2',FACING)],options});assert.equal(point(r,OSA).target,null);assert.equal(r.quality.missingFrequencies,1);assert.equal(r.summary.target,1);assert.equal(r.summary.progress,100);assert.equal(r.summary.unknownTargetPoints,1);
+  const r=buildTracking({planning:planning([{folio:'1',study:REPLICAS[1]},{folio:'2',study:FACING}]),report:[visit('2',FACING)],options});assert.equal(point(r,REPLICAS[1]).target,null);assert.equal(r.quality.missingFrequencies,1);assert.equal(r.summary.target,1);assert.equal(r.summary.progress,100);assert.equal(r.summary.unknownTargetPoints,1);
 });
 test('actual auditor receives productivity even when the planned owner is another auditor',()=>{
   const rows=[{folio:'1',study:FACING,auditor:'100',auditorName:'Ana'},{folio:'2',study:FACING,auditor:'200',auditorName:'Luis'}];

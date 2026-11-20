@@ -1,38 +1,64 @@
 export const SOVI_COMPETITION='SOVI EMBONOR EXHIBICIONES COMPETENCIA';
-const compare=(a,b)=>String(a).localeCompare(String(b),'en',{numeric:true});
+export const SOVI_ROTATING=['SOVI EMBONOR SSD','SOVI EMBONOR JUGOS','SOVI EMBONOR AGUAS','SOVI EMBONOR ENERGETICAS','SOVI EMBONOR ISOTONICOS','SOVI EMBONOR COOLER','SOVI EMBONOR CHECKOUT'];
 
-// Persist the monthly folio groups; survey status must never move a folio.
-// Keep assignments for temporarily disabled points so returning points retain
-// their group. New folios fill the smaller group of their current auditor.
-export function buildSoviSchedule({month,rows,saved=null}){
-  const groups={};
-  if(saved?.month===month){
-    if(saved.version!==1||!saved.groups||typeof saved.groups!=='object'||Array.isArray(saved.groups))throw new Error('El calendario SOVI guardado no tiene un formato válido.');
-    for(const[folio,group]of Object.entries(saved.groups)){
-      if(!/^\d+$/.test(folio)||![1,2].includes(group))throw new Error('El calendario SOVI guardado contiene un grupo inválido.');
-      groups[folio]=group;
+export function sharedSoviPlans(workspace,month){
+  if(workspace?.month!==month)return [];
+  return (workspace.weeklyPlans||[]).filter(plan=>plan.month===month).map(plan=>{
+    const studiesByFolio=new Map();
+    for(const file of plan.result?.files||[])for(const row of file.rows||[]){
+      if(!SOVI_ROTATING.includes(row.study))continue;
+      if(!studiesByFolio.has(row.folio))studiesByFolio.set(row.folio,new Set());
+      studiesByFolio.get(row.folio).add(row.study);
     }
-  }
-  const auditors=new Map();
-  for(const row of rows){
-    if(!auditors.has(row.auditor))auditors.set(row.auditor,new Map());
-    auditors.get(row.auditor).set(row.folio,row);
-  }
-  for(const base of auditors.values()){
-    const cohort=[...base.values()].sort((a,b)=>compare(a.folio,b.folio));
-    const current=cohort.filter(row=>Object.hasOwn(groups,row.folio));
-    const fresh=cohort.filter(row=>!Object.hasOwn(groups,row.folio));
-    if(!current.length){fresh.forEach((row,i)=>groups[row.folio]=i<Math.ceil(fresh.length/2)?1:2);continue;}
-    const counts={1:current.filter(row=>groups[row.folio]===1).length,2:current.filter(row=>groups[row.folio]===2).length};
-    for(const row of fresh){const group=counts[1]<=counts[2]?1:2;groups[row.folio]=group;counts[group]++;}
-  }
-  return {version:1,month,groups};
+    const rotating=[...studiesByFolio].filter(([,studies])=>studies.size===SOVI_ROTATING.length).map(([folio])=>folio);
+    return {week:plan.week,rotating};
+  });
 }
 
-export const soviGroupForWeek=week=>week===1||week===3?1:week===2||week===4?2:null;
-export const competitionWeek=week=>week===1||week===3;
+export function chooseSoviByFortnight({rows,week,savedPlans=[],completed,inHalf,completedInWeekOne,withOsa}){
+  const half=week<=2?1:2,opening=week===1||week===3;
+  const savedThisWeek=new Set(),savedThisHalf=new Map(),savedWeekOne=new Set();
+  for(const plan of savedPlans){
+    for(const folio of plan.rotating){
+      if(plan.week===1)savedWeekOne.add(folio);
+      if(plan.week===week)savedThisWeek.add(folio);
+      else if((plan.week<=2?1:2)===half)savedThisHalf.set(folio,plan.week);
+    }
+  }
 
-export function sharedSoviSchedule(workspace,month){
-  if(workspace?.month!==month)return null;
-  return workspace.metadata?.soviSchedule||workspace.weeklyPlans?.map(plan=>plan.result?.soviSchedule).find(schedule=>schedule?.month===month)||null;
+  const decisions=new Map(),auditors=new Map();
+  for(const row of rows){
+    const {folio,auditor,auditorName}=row;
+    if(!auditors.has(auditor))auditors.set(auditor,{auditor,name:auditorName,eligible:0,pending:0,withoutOsa:0,selected:0,candidates:[]});
+    const summary=auditors.get(auditor);
+    summary.eligible++;
+    if(completed(folio)>=2)decisions.set(folio,'Cuota mensual SOVI cumplida');
+    else if(inHalf(folio,half)>0)decisions.set(folio,'Medición SOVI terminada en esta quincena');
+    else if(savedThisHalf.has(folio))decisions.set(folio,`SOVI ya programado en la semana ${savedThisHalf.get(folio)} de esta quincena`);
+    else{
+      summary.pending++;
+      if(week===5)decisions.set(folio,'Pendiente de la quincena. SOVI se programa en semanas 1 a 4');
+      else summary.candidates.push(row);
+    }
+  }
+
+  const selected=new Set();
+  const preferWeekThree=folio=>week===3&&(savedWeekOne.has(folio)||completedInWeekOne(folio));
+  for(const summary of auditors.values()){
+    summary.candidates.sort((a,b)=>Number(savedThisWeek.has(b.folio))-Number(savedThisWeek.has(a.folio))
+      ||Number(preferWeekThree(b.folio))-Number(preferWeekThree(a.folio))
+      ||Number(withOsa(b.folio))-Number(withOsa(a.folio))
+      ||a.folio.localeCompare(b.folio,'en',{numeric:true}));
+    const limit=opening?Math.ceil(summary.eligible/2):summary.candidates.length;
+    for(const [index,{folio}] of summary.candidates.entries()){
+      if(index<limit){
+        selected.add(folio);summary.selected++;
+        const together=withOsa(folio);
+        if(!together)summary.withoutOsa++;
+        decisions.set(folio,`Medición SOVI programada para la quincena ${half}${together?'':' sin carga OSA esta semana'}`);
+      }else decisions.set(folio,'Pendiente para la siguiente semana de esta quincena');
+    }
+  }
+  const summaries=[...auditors.values()].map(({candidates,...summary})=>summary);
+  return {selected,decisions,auditors:summaries};
 }

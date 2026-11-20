@@ -18,7 +18,6 @@ export function compactSelection(result){
   const columns=['folio','auditor','study','studyId','start','end'];
   const files=result.files.map(file=>({...file,rows:file.rows.map(row=>Object.fromEntries(columns.filter(key=>Object.hasOwn(row,key)).map(key=>[key,row[key]])))}));
   const selection={files,period:result.period,metrics:result.metrics,warnings:result.warnings,workload:result.workload,soviAuditors:result.soviAuditors};
-  if(result.soviSchedule)selection.soviSchedule=result.soviSchedule;
   if(Array.isArray(result.decisions))selection.decisions=result.decisions.map(({folio,study,selected,reason})=>({folio,study,selected,reason}));
   return selection;
 }

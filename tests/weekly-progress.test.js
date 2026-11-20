@@ -60,8 +60,8 @@ test('weekly fixed quotas count each week once, removing duplicates and same-wee
   assert.equal(timelineSum(point),point.fulfilledVisits);assert.equal(result.quality.duplicates,1);
 });
 test('quincenal contributions credit the first two monthly measurements irrespective of half and export order',()=>{
-  const report=['2026-10-19','2026-10-05','2026-10-12','2026-09-28'].map(day=>visit('1',OSA,day));
-  const result=tracking([{folio:'1',study:OSA}],report,[{client:'EMBONOR',folio:'1',frequency:'QUINCENALES'}]);
+  const report=['2026-10-19','2026-10-05','2026-10-12','2026-09-28'].map(day=>visit('1',REPLICAS[1],day));
+  const result=tracking([{folio:'1',study:REPLICAS[1]}],report,[{client:'EMBONOR',folio:'1',frequency:'QUINCENALES'}]);
   const point=result.points[0];assert.equal(point.validVisits,4);assert.equal(point.fulfilledVisits,2);
   assert.deepEqual(point.fulfilledByWeek,[{weekStart:'2026-09-28',fulfilledVisits:1},{weekStart:'2026-10-05',fulfilledVisits:1}]);
   assert.equal(timelineSum(point),point.fulfilledVisits);
@@ -93,7 +93,7 @@ test('an incomplete seven-study group gives no progress while its independent Co
   assert(result.points.filter(point=>point.study!==SOVI_COMPETITION).every(point=>point.fulfilledByWeek.length===0));
 });
 test('weekly totals and cumulative percentages match the filtered monthly target',()=>{
-  const result=tracking([{folio:'1',study:FACING},{folio:'2',study:OSA}],[visit('1',FACING,'2026-09-28'),visit('2',OSA,'2026-09-28'),visit('2',OSA,'2026-10-12')],[{client:'EMBONOR',folio:'2',frequency:'QUINCENALES'}]);
+  const result=tracking([{folio:'1',study:FACING},{folio:'2',study:REPLICAS[1]}],[visit('1',FACING,'2026-09-28'),visit('2',REPLICAS[1],'2026-09-28'),visit('2',REPLICAS[1],'2026-10-12')],[{client:'EMBONOR',folio:'2',frequency:'QUINCENALES'}]);
   const snapshot=structuredClone(result.points),weekly=summarizeWeeklyProgress(result.points,result.period);
   assert.equal(weekly.target,3);assert.equal(weekly.fulfilledVisits,3);assert.deepEqual(weekly.weeks.map(week=>week.fulfilledVisits),[2,0,1,0,0]);
   assert.deepEqual(weekly.weeks.map(week=>week.cumulativeVisits),[2,2,3,3,3]);assert.equal(weekly.weeks[0].progress,66.7);assert.equal(weekly.weeks[2].cumulativeProgress,100);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {select,buildHistory,DEFAULT_ALIASES,OSA,REPLICAS,SOVI,FACING,MONTHLY,FORTNIGHTLY,CV,csvRows} from '../src/engine.js';
+import {select,buildHistory,DEFAULT_ALIASES,OSA,OSA_WEEKLY,REPLICAS,SOVI,SOVI_ROTATING,FACING,MONTHLY,FORTNIGHTLY,CV,csvRows} from '../src/engine.js';
 import {buildTracking} from '../src/tracking.js';
 import {summarizeWeeklyProgress} from '../src/weekly-progress.js';
 import {progressSheets} from '../src/tracking-export.js';
@@ -60,15 +60,14 @@ test('POY and Ferias count their own completed weeks independently',()=>{
   assert.deepEqual(folios(result,'POY'),['002','003']);assert.deepEqual(folios(result,'FERIAS LIBRES'),['001','003']);
 });
 
-test('the final week recovers replicas and Facing while SOVI keeps its calendar and OSA dependency',()=>{
+test('week five recovers weekly OSA and monthly replicas and Facing, with no fifth SOVI round',()=>{
   const input=fixture();
   input.universe.filter(row=>row.client==='EMBONOR'&&row.folio==='001').forEach(row=>row.frequency='QUINCENALES');
   for(const study of weekly)addWeeks(input,study,'001',starts.slice(0,study===REPLICAS[0]?1:[OSA,...REPLICAS].includes(study)?2:4));
   for(const study of SOVI)addWeeks(input,study,'001',[starts[0]]);
   const result=select(input);
-  assert(!folios(result,OSA).includes('001'));
-  assert(folios(result,REPLICAS[0]).includes('001'));
-  for(const study of REPLICAS.slice(1))assert(!folios(result,study).includes('001'));
+  for(const study of OSA_WEEKLY)assert(folios(result,study).includes('001'));
+  for(const study of REPLICAS.filter(study=>!OSA_WEEKLY.includes(study)))assert(!folios(result,study).includes('001'));
   for(const study of SOVI)assert(!folios(result,study).includes('001'));
   assert(folios(result,FACING).includes('001'));
   const sovi=result.files.find(file=>file.name==='SOVI EMBONOR.csv');assert.equal(sovi.rows.filter(row=>row.folio==='001').length,0);
@@ -79,10 +78,12 @@ test('closing overrides apply in week four of a four-week month, but not in week
   for(const weeks of [4,5]){
     const input=fixture(4,weeks);input.options.holidays=2;
     input.universe.filter(row=>row.client==='EMBONOR'&&row.folio==='001').forEach(row=>row.frequency='QUINCENALES');
+    input.options.excludedFolios=['003'];
     input.report.push(visit(OSA,'001',starts[0]),visit(OSA,'001',starts[2]));
     const result=select(input),closing=weeks===4;
     assert.equal(folios(result,FACING).includes('001'),closing);
-    for(const study of REPLICAS)assert.equal(folios(result,study).includes('001'),closing,study);for(const study of SOVI)assert(!folios(result,study).includes('001'));
+    for(const study of REPLICAS)assert.equal(folios(result,study).includes('001'),closing,study);
+    for(const study of SOVI_ROTATING)assert(folios(result,study).includes('001'));
     assert.equal(result.metrics.fixedTarget,closing?2:1);
   }
 });
@@ -115,7 +116,7 @@ test('non-SOVI second monthly measurements in closing agree across dashboard, gr
   for(const weeks of [4,5]){
     const input=fixture(weeks,weeks),closing=starts[weeks-1];
     input.universe.filter(row=>row.client==='EMBONOR').forEach(row=>row.frequency='QUINCENALES');
-    const studies=[OSA,...REPLICAS,...FORTNIGHTLY,...CV];
+    const studies=[...REPLICAS.filter(study=>!OSA_WEEKLY.includes(study)),...FORTNIGHTLY,...CV];
     for(const study of studies)input.report.push(visit(study,'001',starts[2]));
     const before=buildTracking(input);assert(before.points.filter(p=>p.folio==='001'&&studies.includes(p.study)&&p.rule==='fortnightly').every(p=>p.fulfilledVisits===1));
     const result=select(input);
@@ -172,7 +173,8 @@ test('two first-half measurements fulfill the monthly goal and are excluded from
     const input=fixture(week);input.universe.filter(row=>row.client==='EMBONOR').forEach(row=>row.frequency='QUINCENALES');
     for(const study of [OSA,...REPLICAS,...SOVI,...FORTNIGHTLY,...CV])addWeeks(input,study,'001',starts.slice(0,2));
     const result=select(input);
-    for(const study of [OSA,...REPLICAS,...SOVI,...FORTNIGHTLY,...CV])assert(!folios(result,study).includes('001'),study);
+    for(const study of [...REPLICAS.filter(study=>!OSA_WEEKLY.includes(study)),...SOVI_ROTATING,...FORTNIGHTLY,...CV])assert(!folios(result,study).includes('001'),study);
+    for(const study of OSA_WEEKLY)assert(folios(result,study).includes('001'),study);
     const tracking=buildTracking(input),points=tracking.points.filter(p=>p.folio==='001'&&p.rule==='fortnightly');
     assert(points.every(p=>p.complete&&p.fulfilledVisits===2&&p.remaining===0&&p.visitsFirstHalf===2&&p.visitsSecondHalf===0));
     assert.equal(summarizeWeeklyProgress(points,tracking.period).weeks[1].cumulativeProgress,100);

@@ -1,6 +1,6 @@
 // Monthly progress and productivity share normalized inputs with the selector.
 // Competition is independent; the other seven SOVI form a weekly measurement.
-import {normalize,id,isoDate,monday,frequency,SelectionError,OSA,REPLICAS,SOVI,SOVI_ROTATING,SOVI_COMPETITION,FACING,CV,FORTNIGHTLY,MONTHLY,DEFAULT_ALIASES} from './engine.js';
+import {normalize,id,isoDate,monday,frequency,SelectionError,OSA,OSA_WEEKLY,REPLICAS,SOVI,SOVI_ROTATING,SOVI_COMPETITION,FACING,CV,FORTNIGHTLY,MONTHLY,DEFAULT_ALIASES} from './engine.js';
 import {resolveOperationalPeriod,suggestPeriod,validateMonthRange} from './period.js';
 import {savedPlanningIndex} from './saved-planning.js';
 import {WEEKLY_MONTHLY_TARGET,creditedWeeks} from './visit-goals.js';
@@ -91,11 +91,11 @@ function periodFor(planning,options){
   return {month,week,weeks,start,end,...boundaries,asOf:asOf<operationalEnd?asOf:operationalEnd};
 }
 function targets(study,f,weeks){
-  if(study==='SOVI EMBONOR')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos mediciones completas de siete estudios al mes; calendario fijo A/B',requiredStudies:SOVI_ROTATING.length};
+  if(study==='SOVI EMBONOR')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos mediciones completas de siete estudios al mes, con una programación por quincena',requiredStudies:SOVI_ROTATING.length};
   if(study===SOVI_COMPETITION)return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos mediciones mensuales en semanas distintas; asignación fija en semanas 1 y 3'};
   if(FORTNIGHTLY.includes(study))return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos visitas al mes; idealmente una por quincena'};
   if([OSA,...REPLICAS].includes(study)){
-    if(f==='fixed')return {target:weeks,rule:'weekly',frequency:'fija',targetLabel:`${weeks} visitas al mes, en semanas distintas`};
+    if(OSA_WEEKLY.includes(study)||f==='fixed')return {target:weeks,rule:'weekly',frequency:'fija',targetLabel:`${weeks} visitas al mes, en semanas distintas`};
     if(f==='fortnightly')return {target:2,rule:'fortnightly',frequency:'quincenal',targetLabel:'Dos visitas al mes; idealmente una por quincena'};
   }
   if(CV.includes(study)&&[2,3,4].includes(f))return {target:f,rule:f===2?'fortnightly':'monthly',frequency:String(f),targetLabel:f===2?'Dos visitas al mes; idealmente una por quincena':`${f} visitas al mes`};

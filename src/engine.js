@@ -2,14 +2,14 @@
 import { suggestPeriod,resolveOperationalPeriod } from './period.js';
 import { chooseBalanced,summarizeWorkload } from './workload.js';
 import {WEEKLY_MONTHLY_TARGET,creditedWeeks} from './visit-goals.js';
-import {SOVI_COMPETITION,buildSoviSchedule,soviGroupForWeek,competitionWeek} from './sovi-schedule.js';
-export {SOVI_COMPETITION} from './sovi-schedule.js';
+import {SOVI_COMPETITION,SOVI_ROTATING,chooseSoviByFortnight} from './sovi-schedule.js';
+export {SOVI_COMPETITION,SOVI_ROTATING} from './sovi-schedule.js';
 export const normalize = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toUpperCase();
 export const id = value => String(value ?? '').trim().replace(/\.0+$/, '');
 export const OSA = 'OSA BEBESTIBLES';
 export const REPLICAS = ['OSA VINOS EMBONOR','EXHIBICIONES ADICIONALES EMBONOR','OSA ABI EMBONOR','EXHIBICIONES ABI EMBONOR','EQUIPOS DE FRIO EMBONOR'];
-export const SOVI = [SOVI_COMPETITION,'SOVI EMBONOR SSD','SOVI EMBONOR JUGOS','SOVI EMBONOR AGUAS','SOVI EMBONOR ENERGETICAS','SOVI EMBONOR ISOTONICOS','SOVI EMBONOR COOLER','SOVI EMBONOR CHECKOUT'];
-export const SOVI_ROTATING=SOVI.slice(1);
+export const OSA_WEEKLY = [OSA,'OSA VINOS EMBONOR','OSA ABI EMBONOR'];
+export const SOVI = [SOVI_COMPETITION,...SOVI_ROTATING];
 export const FACING = 'FACING ABI EMBONOR';
 export const CV = ['QUIEBRES CRUZ VERDE','CRUZ VERDE PROFUNDIDAD'];
 export const FORTNIGHTLY = ['PRECIOS COLGATE','COLGATE PROMOCIONES FARMACIAS'];
@@ -133,6 +133,7 @@ export function buildHistory(report, {month,start,end,aliases,week=suggestPeriod
     ).reduce((sum,entry)=>sum+entry.fulfilledVisits,0),
     halfCount:(study,folio,half)=>halfTotals.get(JSON.stringify([study,folio,half]))||0,
     soviCount:folio=>sovi.get(folio)||0,
+    soviCompletedInWeekOne:folio=>soviWeeks.get(folio)?.get(monday(operationalStart))?.size===SOVI_ROTATING.length,
     soviHalfCount:(folio,half)=>soviHalves.get(JSON.stringify([folio,half]))||0};
 }
 
@@ -164,7 +165,7 @@ function fortnightReason(selected,total,inHalf,week){
   if(selected)return week===1||week===3?'Primera mitad del auditor; pendiente en esta quincena':'Pendiente de la quincena: segunda mitad o visita no terminada';
   return 'Reservado para la segunda semana de la quincena';
 }
-export function select({planning,universe,report=[],hasReport=false,options}) {
+export function select({planning,universe=[],report=[],hasReport=false,options}) {
   let dateWarning=null;
   if(options.dateOverride){
     const start=isoDate(options.dateOverride.start),end=isoDate(options.dateOverride.end);
@@ -214,15 +215,18 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   }
   if(duplicates.length)fail('Hay folios duplicados dentro de un estudio de RETAIL.',duplicates);
   const rows=s=>[...(byStudy.get(s)?.values()||[])];
+  const needsFrequency=row=>CV.includes(row.study)||REPLICAS.includes(row.study)&&!OSA_WEEKLY.includes(row.study);
+  const frequencyKey=row=>JSON.stringify([CV.includes(row.study)?'CRUZ VERDE':'EMBONOR',row.folio]);
+  const requiredFrequencies=new Set(planning.rows.filter(needsFrequency).map(frequencyKey));
   const frequencies=new Map(), frequencyProblems=[];
   for(const r of universe){
     const key=JSON.stringify([normalize(r.client),r.folio]),f=frequency(r.frequency);
-    if(frequencies.has(key)&&frequencies.get(key)!==f)frequencyProblems.push(`Universo: ${r.client}, folio ${r.folio}, frecuencias contradictorias.`);
+    if(requiredFrequencies.has(key)&&frequencies.has(key)&&frequencies.get(key)!==f)frequencyProblems.push(`Universo: ${r.client}, folio ${r.folio}, frecuencias contradictorias.`);
     frequencies.set(key,f);
   }
-  const freq=row=>FORTNIGHTLY.includes(row.study)?'fortnightly':frequencies.get(JSON.stringify([CV.includes(row.study)?'CRUZ VERDE':'EMBONOR',row.folio]));
+  const freq=row=>OSA_WEEKLY.includes(row.study)?'fixed':FORTNIGHTLY.includes(row.study)?'fortnightly':frequencies.get(frequencyKey(row));
   for(const row of planning.rows){
-    if([OSA,...REPLICAS,...SOVI,FACING,...CV].includes(row.study)){
+    if(needsFrequency(row)){
       const f=freq(row),valid=CV.includes(row.study)?[2,3,4].includes(f):['fixed','fortnightly'].includes(f);
       if(!valid)frequencyProblems.push(`${row.study}: folio ${row.folio}, frecuencia ausente o no válida en UNIVERSO CHILE.`);
     }
@@ -234,7 +238,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     if(absent.length)warnings.push(`Sin registros en el export para: ${absent.map(s=>`${s} (${aliases[s]})`).join(', ')}. Se cuentan 0 visitas; comprueba que el export esté completo.`);
     if(history.stats.valid===0)warnings.push(`El export no aporta visitas válidas para el mes y fechas de esta selección. Para ${month}, solo se cuentan estudios configurados con estado TERMINADO y DIA desde el inicio del mes operativo (${csvDate(history.operationalStart)}) y anterior al inicio de carga (${csvDate(start)}). Si el planning conserva fechas de otra semana, activa «Usar otras fechas de carga» o corrige las filas 2 y 3 de RETAIL. Comprueba el período antes de cargar el ZIP.`);
   }
-  if(history.incomplete.size)warnings.push(`${history.incomplete.size} folios tienen semanas incompletas en los siete SOVI del grupo. No suman medición completa; no cambian los grupos ni generan una reasignación.`);
+  if(history.incomplete.size)warnings.push(`${history.incomplete.size} folios tienen semanas con menos de siete SOVI terminados. Esas semanas no suman una medición completa.`);
   const assignments=new Map(planning.studies.map(s=>[s.name,new Set()])),decisions=[];
   const assign=(study,folio)=>assignments.get(study)?.add(folio);
   const decide=(row,selected,visits,reason)=>{
@@ -283,17 +287,15 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     const v=history.weeklyCount(s,r.folio),yes=v<WEEKLY_MONTHLY_TARGET;
     decide(r,yes,v,yes?`Semanal pendiente: ${v}/${WEEKLY_MONTHLY_TARGET}`:'Cuatro visitas semanales completadas; no repetir');
   }
-  const osaRows=rows(OSA),fixed=osaRows.filter(r=>freq(r)==='fixed');
-  const fixedPending=fixed.filter(r=>history.weeklyCount(OSA,r.folio)<weeks);
+  const osaRows=rows(OSA);
+  const fixedPending=osaRows.filter(r=>history.weeklyCount(OSA,r.folio)<weeks);
   const fixedTarget=Math.round(fixedPending.length*(1-.17*(last?0:holidays)));
-  const osaQuincenal=osaRows.filter(r=>freq(r)==='fortnightly');
-  const osaFortnight=chooseFortnight(osaQuincenal,osaQuincenal,f=>last?history.fortnightFulfilled(OSA,f):history.count(OSA,f),(f,h)=>last?0:history.halfCount(OSA,f,h),last?4:week);
-  const committed=[...decisions.filter(r=>r.selected),...osaQuincenal.filter(r=>osaFortnight.chosen.has(r.folio))];
+  const committed=decisions.filter(r=>r.selected);
   const fixedChosen=chooseBalanced(fixedPending,fixedTarget,f=>history.weeklyCount(OSA,f),committed);
   for(const r of osaRows){
-    const isFixed=freq(r)==='fixed',v=isFixed?history.weeklyCount(OSA,r.folio):history.count(OSA,r.folio);
-    const yes=isFixed?fixedChosen.has(r.folio):osaFortnight.chosen.has(r.folio);
-    decide(r,yes,v,isFixed?(v>=weeks?`Meta semanal cumplida: ${v}/${weeks}; no repetir`:yes?'Fija semanal pendiente; prioridad por visitas y carga del auditor':'Ajuste por feriado; prioridad por visitas y carga del auditor'):last?(yes?'Cierre de mes: medición mensual pendiente':'Cuota mensual cumplida'):fortnightReason(yes,v,history.halfCount(OSA,r.folio,half),week));
+    const visits=history.weeklyCount(OSA,r.folio),selected=fixedChosen.has(r.folio);
+    const reason=visits>=weeks?`Meta semanal cumplida: ${visits}/${weeks}`:selected?'Visita semanal OSA programada':'Ajuste por feriado; prioridad por visitas y carga del auditor';
+    decide(r,selected,visits,reason);
   }
   const osa=assignments.get(OSA)||new Set();
   if(!last&&!studies.has(OSA)&&[...REPLICAS,...SOVI,FACING].some(s=>studies.has(s)))fail('Falta OSA BEBESTIBLES, necesario para seleccionar Embonor.');
@@ -316,25 +318,24 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     const missing=osaRows.filter(r=>osa.has(r.folio)&&!SOVI.every(s=>byStudy.get(s)?.has(r.folio)));
     if(missing.length)warnings.push(`${missing.length} puntos seleccionados en OSA no son elegibles para SOVI porque no están habilitados en los ocho estudios. Se mantienen en OSA y pueden recibir Facing.`);
   }
-  const soviSchedule=buildSoviSchedule({month,rows:soviBase,saved:options.soviSchedule});
-  const group=soviGroupForWeek(week),sovi=new Set(),soviAuditors=[];
-  const rotatingDue=new Set(soviBase.filter(r=>group!==null&&soviSchedule.groups[r.folio]===group).map(r=>r.folio));
-  const competitionDue=new Set(competitionWeek(week)?soviBase.map(r=>r.folio):[]);
-  const rotatingSelected=new Set([...rotatingDue].filter(folio=>osa.has(folio)));
-  const competitionSelected=new Set([...competitionDue].filter(folio=>osa.has(folio)));
-  for(const folio of [...rotatingSelected,...competitionSelected])sovi.add(folio);
-  for(const auditor of new Set(soviBase.map(r=>r.auditor))){
-    const base=soviBase.filter(r=>r.auditor===auditor),due=base.filter(r=>rotatingDue.has(r.folio)||competitionDue.has(r.folio));
-    soviAuditors.push({auditor,name:base[0].auditorName,eligible:base.length,groupA:base.filter(r=>soviSchedule.groups[r.folio]===1).length,groupB:base.filter(r=>soviSchedule.groups[r.folio]===2).length,due:due.length,blocked:due.filter(r=>!osa.has(r.folio)).length,selected:base.filter(r=>rotatingSelected.has(r.folio)).length,competition:base.filter(r=>competitionSelected.has(r.folio)).length});
-  }
-  const blocked=soviBase.filter(r=>(rotatingDue.has(r.folio)||competitionDue.has(r.folio))&&!osa.has(r.folio));
-  if(blocked.length)warnings.push(`${blocked.length} folios SOVI del calendario están bloqueados porque no fueron seleccionados en OSA. Se conserva su grupo y no se trasladan a otra semana por falta de visita.`);
+  const rotation=chooseSoviByFortnight({
+    rows:soviBase,week,savedPlans:options.soviPlans,completed:history.soviCount,
+    inHalf:history.soviHalfCount,completedInWeekOne:history.soviCompletedInWeekOne,
+    withOsa:folio=>osa.has(folio),
+  });
+  const {selected:rotatingSelected,auditors:soviAuditors}=rotation;
+  const competitionDue=week===1||week===3;
+  const competitionSelected=new Set(competitionDue?soviBase.filter(r=>osa.has(r.folio)).map(r=>r.folio):[]);
+  const sovi=new Set([...rotatingSelected,...competitionSelected]);
+  const withoutOsa=soviAuditors.reduce((sum,auditor)=>sum+auditor.withoutOsa,0);
+  if(withoutOsa)warnings.push(`${withoutOsa} folios SOVI se programaron sin OSA para cubrir su quincena.`);
   for(const s of SOVI)for(const r of rows(s)){
-    const competition=s===SOVI_COMPETITION,selected=competition?competitionSelected:rotatingSelected,due=competition?competitionDue:rotatingDue;
-    const owner=byStudy.get(OSA)?.get(r.folio),all=SOVI.every(n=>byStudy.get(n)?.has(r.folio)),yes=selected.has(r.folio);
+    const competition=s===SOVI_COMPETITION,selected=competition?competitionSelected:rotatingSelected;
+    const owner=byStudy.get(OSA)?.get(r.folio),yes=selected.has(r.folio);
     if(yes&&owner&&r.auditor!==owner.auditor)fail(`Auditor inconsistente para el folio ${r.folio} en ${s}.`);
     const visits=competition?history.count(s,r.folio):history.soviCount(r.folio);
-    const reason=!all?'No habilitado en los ocho SOVI':week===5?'Calendario SOVI: sin carga en semana 5; sin recuperación de pendientes':!due.has(r.folio)?competition?'Competencia: carga completa solo en semanas 1 y 3':`Grupo ${soviSchedule.groups[r.folio]===1?'A: semanas 1 y 3':'B: semanas 2 y 4'}; no corresponde esta semana`:!osa.has(r.folio)?'Calendario SOVI bloqueado: no seleccionado en OSA':competition?'Competencia: carga completa por calendario (semanas 1 y 3)':`Calendario fijo SOVI: grupo ${group===1?'A':'B'}; independiente de visitas realizadas`;
+    const competitionReason=!competitionDue?'Competencia se programa en semanas 1 y 3':yes?'Competencia programada':'Competencia pendiente. Falta programar OSA esta semana';
+    const reason=rotation.decisions.has(r.folio)?competition?competitionReason:rotation.decisions.get(r.folio):'No habilitado en los ocho SOVI';
     decide(r,yes,visits,reason);
   }
   let facingExceptions=0;
@@ -344,7 +345,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
     if(exception)facingExceptions++;
     decide(r,yes,visits,visits>0?'Visita mensual Facing completada':last?'Cierre de mes: Facing pendiente; no requiere OSA y puede coincidir con SOVI':!osa.has(r.folio)?'No seleccionado en OSA':sovi.has(r.folio)?'Ya seleccionado en SOVI':'Facing pendiente, con OSA y sin SOVI');
   }
-  if(last)warnings.push(`Cierre de mes (semana ${week} de ${weeks}): réplicas y Facing pueden cargarse sin OSA; Facing puede coincidir con SOVI. SOVI mantiene su calendario fijo, exige OSA y no recupera pendientes. Sin reducción por feriados. Fijas Embonor: meta de ${weeks} visitas en semanas distintas.`);
+  if(last)warnings.push(`Cierre de mes (semana ${week} de ${weeks}): réplicas y Facing pueden cargarse sin OSA; Facing puede coincidir con SOVI. Sin reducción por feriados. Fijas Embonor: meta de ${weeks} visitas en semanas distintas.`);
   if(facingExceptions)warnings.push(`Cierre de mes: ${facingExceptions} puntos Facing usan la excepción de dependencia con OSA o coincidencia con SOVI.`);
   const audited=decisions.filter(r=>r.visitsFirstHalf!==null&&!SOVI.includes(r.study));
   const repeated=audited.filter(r=>r.visitsFirstHalf>1||r.visitsSecondHalf>1);
@@ -359,7 +360,7 @@ export function select({planning,universe,report=[],hasReport=false,options}) {
   if(soviPresent.length)files.push({name:'SOVI EMBONOR.csv',rows:SOVI.flatMap(s=>rows(s).filter(r=>assignments.get(s).has(r.folio)))});
   const selectedRows=files.flatMap(f=>f.rows);
   const workload=summarizeWorkload(planning.rows,selectedRows);
-  return {files,decisions,warnings,history:history.stats,soviSchedule,soviAuditors,workload,period:{month,week,weeks,holidays,start,end,half,operationalStart:history.operationalStart,operationalEnd:history.operationalEnd,secondHalfStart:history.secondHalfStart,...(history.monthRange?{monthRange:history.monthRange}:{})},metrics:{points:new Set(selectedRows.map(r=>r.folio)).size,rows:selectedRows.length,files:files.length,auditors:new Set(selectedRows.map(r=>r.auditor)).size,osa:osa.size,sovi:sovi.size,soviRotating:rotatingSelected.size,soviCompetition:competitionSelected.size,soviRows:rotatingSelected.size*7+competitionSelected.size,facingExceptions,fixedTotal:fixed.length,fixedTarget}};
+  return {files,decisions,warnings,history:history.stats,soviAuditors,workload,period:{month,week,weeks,holidays,start,end,half,operationalStart:history.operationalStart,operationalEnd:history.operationalEnd,secondHalfStart:history.secondHalfStart,...(history.monthRange?{monthRange:history.monthRange}:{})},metrics:{points:new Set(selectedRows.map(r=>r.folio)).size,rows:selectedRows.length,files:files.length,auditors:new Set(selectedRows.map(r=>r.auditor)).size,osa:osa.size,sovi:sovi.size,soviRotating:rotatingSelected.size,soviCompetition:competitionSelected.size,soviRows:rotatingSelected.size*7+competitionSelected.size,facingExceptions,fixedTotal:osaRows.length,fixedTarget}};
 }
 function csvCell(value){const s=String(value??'');return /[;"\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
 export function csvRows(rows){return rows.map(r=>[r.folio,r.auditor,r.studyId,csvDate(r.start),csvDate(r.start),csvDate(r.end)].map(csvCell).join(';')).join('\r\n')+(rows.length?'\r\n':'');}
